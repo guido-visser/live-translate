@@ -35,9 +35,10 @@ The operator page has the controls needed during a service; everything else is u
 
 * **Start / Stop translating** and **Pause** (also the space bar).
 * **Spoken language**: the main language plus the quick languages (keys `1`, `2`, `3`…). Switching is immediate.
-* **Level meter**, **live transcript**, **listeners** per language and **performance** figures.
+* **Level meter**, **live transcript** and **listeners** per language.
+* **Audio**: input type, device, channel and gain. Gain applies immediately; other changes reopen the input.
 * **vMix**: *Send translated text to vMix* and *Overlay* switches.
-* **QR code** (header): the code people scan, with a full-screen option for a projector.
+* Header: **Performance** (shows or hides the performance figures), **QR code** (the code people scan, with a full-screen option), **Settings**, interface language. Language names follow the interface language.
 
 **Settings** (tabs)
 

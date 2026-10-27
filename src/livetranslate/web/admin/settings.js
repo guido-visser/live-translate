@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const { $, t, api, withPin } = window.LT;
+  const { $, t, api, withPin, langName, sortByName } = window.LT;
   const form = $("settingsForm");
 
   let state = null;
@@ -31,28 +31,13 @@
   const kind = () => form.querySelector("input[name=kind]:checked")?.value || "device";
 
   function renderDevices() {
-    const select = $("device");
-    const list = devices.filter((d) => d.kind === (kind() === "loopback" ? "loopback" : "device"));
-    const wanted = select.value || state.settings.audio.device;
-    select.textContent = "";
-    for (const d of list) {
-      const o = new Option(`${d.name} — ${d.host_api}${d.is_default ? " ★" : ""}`, d.id);
-      o.dataset.channels = d.channels;
-      select.appendChild(o);
-    }
-    if (wanted && list.some((d) => d.id === wanted)) select.value = wanted;
-    else if (list.length) select.value = (list.find((d) => d.is_default) || list[0]).id;
+    window.LT.fillDevices($("device"), devices, kind(), $("device").value || state.settings.audio.device);
     renderChannels();
   }
 
   function renderChannels() {
-    const select = $("channel");
-    const current = select.value || String(state.settings.audio.channel);
     const channels = Number($("device").selectedOptions[0]?.dataset.channels || 2);
-    select.textContent = "";
-    select.appendChild(new Option(t("mix"), "0"));
-    for (let i = 1; i <= channels; i++) select.appendChild(new Option(String(i), String(i)));
-    select.value = [...select.options].some((o) => o.value === current) ? current : "0";
+    window.LT.fillChannels($("channel"), channels, $("channel").value || state.settings.audio.channel);
   }
 
   function renderKind() {
@@ -82,39 +67,51 @@
 
   // -- languages -------------------------------------------------------------------------
 
-  function checkList(box, options, chosen, extra = () => "") {
+  // Checkbox list of languages, named and sorted in the interface language. Keeps
+  // unsaved ticks when it is redrawn (e.g. after switching the interface language).
+  function checkList(box, codes, saved, extra = () => "") {
+    const drawn = box.querySelectorAll("input:not(:disabled)").length > 0;
+    const chosen = drawn ? new Set([...box.querySelectorAll("input:checked:not(:disabled)")].map((i) => i.value)) : saved;
     box.textContent = "";
-    for (const lang of options) {
+    for (const code of sortByName(codes)) {
       const label = document.createElement("label");
       label.className = "check";
       label.innerHTML = '<input type="checkbox"> <span></span>';
-      label.querySelector("input").value = lang.code;
-      label.querySelector("input").checked = chosen.has(lang.code);
-      label.querySelector("span").textContent = `${lang.name}${extra(lang)}`;
+      label.querySelector("input").value = code;
+      label.querySelector("input").checked = chosen.has(code);
+      label.querySelector("span").textContent = `${langName(code)}${extra(code)}`;
       box.appendChild(label);
     }
   }
 
   function renderTargets() {
     const s = state.settings;
-    const options = state.target_languages.length
-      ? state.target_languages.filter((l) => l.code !== $("sourceLang").value)
-      : s.target_languages.map((code) => ({ code, name: code }));
+    const main = $("sourceLang").value;
+    const codes = state.target_languages.length ? state.target_languages.map((l) => l.code) : s.target_languages;
     const tts = new Set(state.tts_languages);
-    checkList($("targets"), options, new Set(s.target_languages), (l) => (tts.has(l.code) ? " 🔊" : ""));
+    checkList($("targets"), codes.filter((c) => c !== main), new Set(s.target_languages), (c) => (tts.has(c) ? " 🔊" : ""));
   }
 
   function renderQuick() {
     const main = $("sourceLang").value;
-    const mainName = state.source_languages.find((l) => l.code === main)?.name || main;
     const box = $("quick");
-    const options = state.quick_language_options.filter((l) => l.code !== main);
-    checkList(box, options, new Set(state.settings.quick_languages));
+    const codes = state.quick_language_options.map((l) => l.code).filter((c) => c !== main);
+    checkList(box, codes, new Set(state.settings.quick_languages));
+    box.querySelector("input:disabled")?.closest("label").remove();
     const fixed = document.createElement("label");
     fixed.className = "check";
     fixed.innerHTML = '<input type="checkbox" checked disabled> <span></span>';
-    fixed.querySelector("span").textContent = `${mainName} (${t("quickMain")})`;
+    fixed.querySelector("span").textContent = `${langName(main)} (${t("quickMain")})`;
     box.prepend(fixed);
+  }
+
+  function renderSourceLanguages() {
+    const src = $("sourceLang");
+    const wanted = src.value || state.settings.source_language;
+    const codes = state.source_languages.length ? state.source_languages.map((l) => l.code) : [wanted];
+    src.textContent = "";
+    for (const code of sortByName(codes)) src.appendChild(new Option(langName(code), code));
+    src.value = wanted;
   }
 
   $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); renderVmixLanguages(); });
@@ -139,14 +136,12 @@
     const select = $("vmixLanguage");
     const wanted = select.value || state.settings.vmix.language || "";
     const main = $("sourceLang").value;
-    const name = (code) =>
-      [...state.target_languages, ...state.source_languages].find((l) => l.code === code)?.name || code;
     select.textContent = "";
-    select.appendChild(new Option(`${name(main)} (${t("quickMain")})`, ""));
-    for (const code of state.settings.target_languages) {
-      if (code !== main) select.appendChild(new Option(name(code), code));
+    select.appendChild(new Option(`${langName(main)} (${t("quickMain")})`, ""));
+    for (const code of sortByName(state.settings.target_languages.filter((c) => c !== main))) {
+      select.appendChild(new Option(langName(code), code));
     }
-    if (wanted && ![...select.options].some((o) => o.value === wanted)) select.appendChild(new Option(name(wanted), wanted));
+    if (wanted && ![...select.options].some((o) => o.value === wanted)) select.appendChild(new Option(langName(wanted), wanted));
     select.value = wanted === main ? "" : wanted;
   }
 
@@ -237,11 +232,10 @@
     $("model").value = s.asr.model;
     $("asrDevice").value = s.asr.device;
 
-    const src = $("sourceLang");
-    src.textContent = "";
-    const sources = state.source_languages.length ? state.source_languages : [{ code: s.source_language, name: s.source_language }];
-    for (const l of sources) src.appendChild(new Option(l.name, l.code));
-    src.value = s.source_language;
+    $("sourceLang").textContent = "";
+    renderSourceLanguages();
+    $("targets").textContent = "";
+    $("quick").textContent = "";
     renderTargets();
     renderQuick();
     $("tts").checked = s.tts_enabled;
@@ -338,7 +332,15 @@
     ws.onclose = () => setTimeout(connect, 2000);
   }
 
-  window.LT.onLanguageChange(() => { if (state) { renderChannels(); renderQuick(); renderAddresses(); renderVmixLanguages(); } });
+  window.LT.onLanguageChange(() => {
+    if (!state) return;
+    renderChannels();
+    renderSourceLanguages();
+    renderTargets();
+    renderQuick();
+    renderAddresses();
+    renderVmixLanguages();
+  });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));
   Promise.all([api("/api/admin/state"), api("/api/admin/devices")]).then(([s, d]) => {

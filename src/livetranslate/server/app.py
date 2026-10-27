@@ -257,7 +257,10 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         if new.source_language != old.source_language or new.vmix.url != old.vmix.url:
             services.pipeline.speaker_language = new.source_language
             services.vmix.previous = None
-        if (new.audio, new.asr, new.source_language) != (old.audio, old.asr, old.source_language):
+        # Gain applies live; any other audio change reopens the input.
+        services.pipeline.set_gain(new.audio.gain)
+        audio_changed = new.audio.model_copy(update={"gain": old.audio.gain}) != old.audio
+        if audio_changed or (new.asr, new.source_language) != (old.asr, old.source_language):
             asyncio.create_task(services.pipeline.restart())
         services.hub.to_listeners(services.languages_message())
         return admin_state()

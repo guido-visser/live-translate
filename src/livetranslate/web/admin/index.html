@@ -15,6 +15,7 @@
       <span id="trPill" class="pill"></span>
     </div>
     <div class="top-actions">
+      <button id="perfBtn" class="icon-btn" type="button" aria-pressed="false"><span aria-hidden="true">📈</span> <span data-t="performance"></span></button>
       <button id="qrBtn" class="icon-btn" type="button"><span aria-hidden="true">▦</span> <span data-t="qr"></span></button>
       <a class="icon-btn" href="/admin/settings" data-pin-link><span aria-hidden="true">⚙</span> <span data-t="settings"></span></a>
       <select id="uiLang" aria-label="Language">
@@ -51,29 +52,59 @@
       <p id="partial" class="partial"></p>
     </section>
 
-    <section class="card">
-      <h2 data-t="listeners"></h2>
-      <table class="listeners"><tbody id="listenerRows"></tbody></table>
-    </section>
+    <div class="side">
+      <section id="perfCard" class="card" hidden>
+        <h2 data-t="performance"></h2>
+        <dl id="stats" class="stats"></dl>
+      </section>
 
-    <section class="card vmix-quick">
-      <h2>vMix</h2>
-      <label class="switch-row">
-        <span data-t="sendToVmix"></span>
-        <button id="vmixSend" class="switch" type="button" role="switch" aria-checked="false"></button>
-      </label>
-      <label class="switch-row">
-        <span data-t="overlay"></span>
-        <button id="vmixOverlay" class="switch" type="button" role="switch" aria-checked="false"></button>
-      </label>
-      <p id="vmixStatus" class="small muted"></p>
-      <pre id="vmixLast" class="vmix-last" hidden></pre>
-    </section>
+      <section class="card">
+        <h2 data-t="listeners"></h2>
+        <table class="listeners"><tbody id="listenerRows"></tbody></table>
+      </section>
 
-    <section class="card">
-      <h2 data-t="performance"></h2>
-      <dl id="stats" class="stats"></dl>
-    </section>
+      <section class="card audio-quick">
+        <h2 data-t="tabAudio"></h2>
+        <div class="seg-control compact" role="radiogroup">
+          <label><input type="radio" name="qkind" value="device"><span data-t="kindDevice"></span></label>
+          <label><input type="radio" name="qkind" value="loopback"><span data-t="kindLoopback"></span></label>
+          <label><input type="radio" name="qkind" value="file"><span data-t="kindFile"></span></label>
+        </div>
+        <div id="qDeviceRow" class="row">
+          <label for="qDevice" data-t="device"></label>
+          <div class="inline">
+            <select id="qDevice"></select>
+            <button id="qRefresh" type="button" aria-label="Refresh">↻</button>
+          </div>
+        </div>
+        <p id="qFile" class="small muted file-name" hidden></p>
+        <div class="row pair">
+          <div id="qChannelBox">
+            <label for="qChannel" data-t="channel"></label>
+            <select id="qChannel"></select>
+          </div>
+          <div>
+            <label for="qGain"><span data-t="gain"></span> <span id="qGainText" class="mono"></span></label>
+            <input id="qGain" type="range" min="0.25" max="4" step="0.25">
+          </div>
+        </div>
+        <p id="qStatus" class="small muted" hidden></p>
+      </section>
+
+      <section class="card vmix-quick">
+        <h2>vMix</h2>
+        <label class="switch-row">
+          <span data-t="sendToVmix"></span>
+          <button id="vmixSend" class="switch" type="button" role="switch" aria-checked="false"></button>
+        </label>
+        <label class="switch-row">
+          <span data-t="overlay"></span>
+          <button id="vmixOverlay" class="switch" type="button" role="switch" aria-checked="false"></button>
+        </label>
+        <p id="vmixStatus" class="small muted"></p>
+        <pre id="vmixLast" class="vmix-last" hidden></pre>
+      </section>
+    </div>
   </main>
 
   <dialog id="qrDialog" class="qr-dialog">

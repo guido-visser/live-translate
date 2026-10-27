@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const { $, t, api, withPin } = window.LT;
+  const { $, t, api, withPin, langName } = window.LT;
 
   let state = null; // last /api/admin/state
   let status = { state: "stopped", paused: false, error: "" };
@@ -56,7 +56,7 @@
     const box = $("speakerButtons");
     const langs = state?.speaker_languages || [];
     const current = status.speaker_language || mainLanguage();
-    const signature = langs.map((l) => `${l.code}:${l.name}`).join();
+    const signature = `${window.LT.lang}|${langs.map((l) => l.code).join()}`;
     if (box.dataset.langs !== signature) {
       box.dataset.langs = signature;
       box.textContent = "";
@@ -66,7 +66,7 @@
         b.dataset.lang = lang.code;
         b.setAttribute("role", "radio");
         b.innerHTML = `<span></span><span class="key">${i + 1}</span>`;
-        b.firstChild.textContent = lang.name;
+        b.firstChild.textContent = langName(lang.code, lang.name);
         b.addEventListener("click", () => setSpeaker(lang.code));
         box.appendChild(b);
       });
@@ -157,6 +157,88 @@
     }
   });
 
+  // -- quick audio panel ------------------------------------------------------------
+
+  let devices = [];
+  const qKind = () => document.querySelector("input[name=qkind]:checked")?.value || "device";
+
+  function renderAudio() {
+    if (!state) return;
+    const audio = state.settings.audio;
+    const radio = document.querySelector(`input[name=qkind][value=${audio.kind}]`);
+    if (radio && document.activeElement?.name !== "qkind") radio.checked = true;
+    const file = qKind() === "file";
+    $("qDeviceRow").hidden = file;
+    $("qChannelBox").hidden = file;
+    $("qFile").hidden = !file;
+    $("qFile").textContent = audio.file_path ? audio.file_path.split(/[\\/]/).pop() : "—";
+    if (!file && document.activeElement !== $("qDevice")) {
+      window.LT.fillDevices($("qDevice"), devices, qKind(), audio.device);
+    }
+    const channels = Number($("qDevice").selectedOptions[0]?.dataset.channels || 2);
+    if (document.activeElement !== $("qChannel")) window.LT.fillChannels($("qChannel"), channels, audio.channel);
+    if (document.activeElement !== $("qGain")) $("qGain").value = audio.gain;
+    $("qGainText").textContent = `${Number($("qGain").value).toFixed(2).replace(/0$/, "")}×`;
+  }
+
+  async function saveAudio() {
+    const settings = structuredClone(state.settings);
+    settings.audio.kind = qKind();
+    if (settings.audio.kind !== "file") {
+      settings.audio.device = $("qDevice").value || null;
+      settings.audio.channel = Number($("qChannel").value || 0);
+    }
+    settings.audio.gain = Number($("qGain").value);
+    try {
+      state = await window.LT.saveSettings(settings);
+      $("qStatus").hidden = true;
+    } catch (err) {
+      $("qStatus").textContent = err.message;
+      $("qStatus").hidden = false;
+    }
+    renderAudio();
+  }
+
+  async function loadDevices() {
+    try {
+      devices = await api("/api/admin/devices");
+    } catch {
+      devices = [];
+    }
+    renderAudio();
+  }
+
+  document.querySelectorAll("input[name=qkind]").forEach((r) =>
+    r.addEventListener("change", () => {
+      if (qKind() !== "file") window.LT.fillDevices($("qDevice"), devices, qKind(), null);
+      saveAudio();
+    })
+  );
+  $("qDevice").addEventListener("change", () => {
+    const channels = Number($("qDevice").selectedOptions[0]?.dataset.channels || 2);
+    window.LT.fillChannels($("qChannel"), channels, 0);
+    saveAudio();
+  });
+  $("qChannel").addEventListener("change", saveAudio);
+  $("qGain").addEventListener("input", () => {
+    $("qGainText").textContent = `${Number($("qGain").value).toFixed(2).replace(/0$/, "")}×`;
+  });
+  $("qGain").addEventListener("change", saveAudio);
+  $("qRefresh").addEventListener("click", loadDevices);
+
+  // -- performance toggle -------------------------------------------------------------
+
+  function showPerformance(on) {
+    $("perfCard").hidden = !on;
+    $("perfBtn").setAttribute("aria-pressed", String(on));
+    $("perfBtn").classList.toggle("active", on);
+    try { localStorage.setItem("lt.admin.perf", on ? "1" : "0"); } catch { /* ignore */ }
+  }
+  $("perfBtn").addEventListener("click", () => showPerformance($("perfCard").hidden));
+  let perfSaved = false;
+  try { perfSaved = localStorage.getItem("lt.admin.perf") === "1"; } catch { /* ignore */ }
+  showPerformance(perfSaved);
+
   // -- QR dialog -------------------------------------------------------------------
 
   $("qrBtn").addEventListener("click", () => {
@@ -173,15 +255,10 @@
 
   // -- transcript, listeners, stats, level -------------------------------------------
 
-  function langName(code) {
-    const all = [...(state?.target_languages || []), ...(state?.source_languages || [])];
-    return all.find((l) => l.code === code)?.name || code;
-  }
-
   function renderListeners(text = {}, audio = {}) {
     const rows = $("listenerRows");
     rows.textContent = "";
-    const langs = [...new Set([...Object.keys(text), ...Object.keys(audio)])].sort();
+    const langs = window.LT.sortByName(new Set([...Object.keys(text), ...Object.keys(audio)]));
     if (!langs.length) {
       rows.innerHTML = `<tr><td class="muted"></td></tr>`;
       rows.querySelector("td").textContent = t("none");
@@ -239,6 +316,7 @@
     translator = state.translator;
     renderStatus();
     renderVmix(state.vmix);
+    renderAudio();
     $("transcript").textContent = "";
     for (const seg of state.history) addTranscript(seg.text, seg.lang);
   }
@@ -250,6 +328,7 @@
       const msg = JSON.parse(ev.data);
       if (msg.type === "tick") {
         renderLevel(msg.level_db);
+        lastCounts = [msg.listeners, msg.audio_listeners];
         renderListeners(msg.listeners, msg.audio_listeners);
         renderStats(msg.stats, msg.gpu);
         status = msg.status;
@@ -277,9 +356,11 @@
   // Settings may change in the other page (or tab): pick them up when we come back.
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadState(); });
 
-  window.LT.onLanguageChange(() => { renderStatus(); renderVmix(); renderListeners(); });
+  let lastCounts = [{}, {}];
+  window.LT.onLanguageChange(() => { renderStatus(); renderVmix(); renderListeners(...lastCounts); renderAudio(); });
   window.LT.applyTexts();
   renderListeners();
   loadState();
+  loadDevices();
   connect();
 })();

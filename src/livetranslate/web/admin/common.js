@@ -50,5 +50,47 @@ window.LT = (() => {
     return api("/api/admin/settings", { method: "POST", body: JSON.stringify(settings) });
   }
 
-  return { $, withPin, t, api, saveSettings, applyTexts, onLanguageChange, get lang() { return lang; } };
+  // Language names in the interface language ("Russisch" in Dutch, "Russian" in English…).
+  const BCP47 = { zt: "zh-Hant", zh: "zh-Hans" };
+  let names = null;
+  let namesLang = null;
+  function langName(code, fallback) {
+    if (namesLang !== lang) {
+      try { names = new Intl.DisplayNames([lang], { type: "language" }); } catch { names = null; }
+      namesLang = lang;
+    }
+    let name = null;
+    try { name = names?.of(BCP47[code] || code); } catch { /* unknown code */ }
+    if (!name || name === code) name = fallback || code;
+    return name.charAt(0).toLocaleUpperCase(lang) + name.slice(1);
+  }
+
+  function sortByName(codes) {
+    return [...codes].sort((a, b) => langName(a).localeCompare(langName(b), lang));
+  }
+
+  // Audio device and channel lists (main screen and settings).
+  function fillDevices(select, devices, kind, wanted) {
+    const list = devices.filter((d) => d.kind === (kind === "loopback" ? "loopback" : "device"));
+    select.textContent = "";
+    for (const d of list) {
+      const o = new Option(`${d.name} — ${d.host_api}${d.is_default ? " ★" : ""}`, d.id);
+      o.dataset.channels = d.channels;
+      select.appendChild(o);
+    }
+    if (wanted && list.some((d) => d.id === wanted)) select.value = wanted;
+    else if (list.length) select.value = (list.find((d) => d.is_default) || list[0]).id;
+  }
+
+  function fillChannels(select, channels, current) {
+    select.textContent = "";
+    select.appendChild(new Option(t("mix"), "0"));
+    for (let i = 1; i <= channels; i++) select.appendChild(new Option(String(i), String(i)));
+    select.value = [...select.options].some((o) => o.value === String(current)) ? String(current) : "0";
+  }
+
+  return {
+    $, withPin, t, api, saveSettings, applyTexts, onLanguageChange, langName, sortByName, fillDevices, fillChannels,
+    get lang() { return lang; },
+  };
 })();

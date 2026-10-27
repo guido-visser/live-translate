@@ -156,6 +156,10 @@ class Pipeline:
         await self.stop()
         await self.start()
 
+    def set_gain(self, gain: float) -> None:
+        if self._source is not None:
+            self._source.gain = gain
+
     def set_paused(self, paused: bool) -> None:
         self.paused = paused
         self._broadcast_status()

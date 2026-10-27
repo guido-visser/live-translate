@@ -225,3 +225,24 @@ def test_vmix_can_show_another_language(client):
         {"Function": "SetText", "Input": "bbb-222", "SelectedName": "Headline.Text", "Value": ""},
         {"Function": "OverlayInput7Out"},
     ]
+
+
+def test_gain_applies_live_without_restart(client):
+    pipeline = client.services.pipeline
+    restarts = []
+
+    async def fake_restart():
+        restarts.append(True)
+
+    pipeline.restart = fake_restart
+    pipeline._source = type("FakeSource", (), {"gain": 1.0, "level_db": -120.0})()
+
+    settings = client.get("/api/admin/state").json()["settings"]
+    settings["audio"]["gain"] = 2.5
+    client.post("/api/admin/settings", json=settings)
+    assert pipeline._source.gain == 2.5 and restarts == []
+
+    settings["audio"]["channel"] = 2
+    client.post("/api/admin/settings", json=settings)
+    assert restarts == [True]
+    pipeline._source = None
