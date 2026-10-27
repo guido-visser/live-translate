@@ -117,7 +117,7 @@
     box.prepend(fixed);
   }
 
-  $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); });
+  $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); renderVmixLanguages(); });
   $("engine").addEventListener("change", () => ($("nllbRows").hidden = $("engine").value !== "nllb"));
 
   // -- vMix ------------------------------------------------------------------------------
@@ -133,6 +133,33 @@
     }
     select.value = wanted || "";
     renderVmixFields();
+  }
+
+  function renderVmixLanguages() {
+    const select = $("vmixLanguage");
+    const wanted = select.value || state.settings.vmix.language || "";
+    const main = $("sourceLang").value;
+    const name = (code) =>
+      [...state.target_languages, ...state.source_languages].find((l) => l.code === code)?.name || code;
+    select.textContent = "";
+    select.appendChild(new Option(`${name(main)} (${t("quickMain")})`, ""));
+    for (const code of state.settings.target_languages) {
+      if (code !== main) select.appendChild(new Option(name(code), code));
+    }
+    if (wanted && ![...select.options].some((o) => o.value === wanted)) select.appendChild(new Option(name(wanted), wanted));
+    select.value = wanted === main ? "" : wanted;
+  }
+
+  function renderOverlayChannels() {
+    // vMix reports how many overlay channels it has; fall back to the classic four.
+    const select = $("vmixOverlay");
+    const wanted = select.value || String(state.settings.vmix.overlay);
+    const channels = Object.keys(vmixState?.overlays || {}).map(Number).filter((n) => n > 0);
+    const list = channels.length ? channels : [1, 2, 3, 4];
+    if (!list.includes(Number(wanted))) list.push(Number(wanted));
+    select.textContent = "";
+    for (const n of list.sort((a, b) => a - b)) select.appendChild(new Option(String(n), String(n)));
+    select.value = wanted;
   }
 
   function renderVmixFields() {
@@ -161,6 +188,7 @@
       showVmixStatus(false, err.message);
     }
     renderVmixInputs();
+    renderOverlayChannels();
   }
 
   $("vmixRefresh").addEventListener("click", refreshVmix);
@@ -224,7 +252,8 @@
 
     $("vmixEnabled").checked = s.vmix.enabled;
     $("vmixUrl").value = s.vmix.url;
-    $("vmixOverlay").value = String(s.vmix.overlay);
+    renderVmixLanguages();
+    renderOverlayChannels();
     $("vmixMaxChars").value = s.vmix.max_chars;
     $("vmixAuto").checked = s.vmix.auto_overlay;
     renderVmixInputs();
@@ -260,6 +289,7 @@
     s.vmix.input = $("vmixInput").value;
     s.vmix.field = $("vmixField").value;
     s.vmix.overlay = Number($("vmixOverlay").value);
+    s.vmix.language = $("vmixLanguage").value;
     s.vmix.max_chars = Math.max(20, Math.min(1000, Number($("vmixMaxChars").value) || 160));
     s.vmix.auto_overlay = $("vmixAuto").checked;
 
@@ -308,7 +338,7 @@
     ws.onclose = () => setTimeout(connect, 2000);
   }
 
-  window.LT.onLanguageChange(() => { if (state) { renderChannels(); renderQuick(); renderAddresses(); } });
+  window.LT.onLanguageChange(() => { if (state) { renderChannels(); renderQuick(); renderAddresses(); renderVmixLanguages(); } });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));
   Promise.all([api("/api/admin/state"), api("/api/admin/devices")]).then(([s, d]) => {

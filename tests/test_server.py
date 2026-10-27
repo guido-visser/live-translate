@@ -180,11 +180,10 @@ def test_testimony_in_russian_goes_to_phones_and_vmix(client):
         client.post("/api/admin/speaker", json={"lang": "nl"})
         assert fake.calls[-1] == {"Function": "OverlayInput1Out"}
 
-        # Dutch speech is not sent to vMix.
-        calls = len(fake.calls)
+        # Dutch speech goes to vMix as it is (vMix shows the main language).
         client.portal.call(pipeline._sentences.put_nowait, ("Dank je wel.", time.time(), "nl"))
         assert receive_until(nl, "segment")["text"] == "Dank je wel."
-        assert len(fake.calls) == calls
+        assert fake.calls[-1]["Value"].endswith("Dank je wel.")
 
     assert client.post("/api/admin/speaker", json={"lang": "xx"}).status_code == 400
 
@@ -196,3 +195,33 @@ def test_quick_languages_setting_drives_speaker_buttons(client):
     assert [l["code"] for l in state["speaker_languages"]] == ["nl", "uk", "en"]
     assert client.post("/api/admin/speaker", json={"lang": "ru"}).status_code == 400
     assert client.get("/admin/settings").status_code == 200
+
+
+def test_vmix_can_show_another_language(client):
+    from tests.test_vmix import FakeVmix
+
+    fake = FakeVmix()
+    client.services.vmix._transport = fake.transport
+    settings = client.get("/api/admin/state").json()["settings"]
+    settings["vmix"].update(enabled=True, input="bbb-222", field="Headline.Text", language="en", overlay=7)
+    client.post("/api/admin/settings", json=settings)
+    pipeline = client.services.pipeline
+
+    with client.websocket_connect("/ws/listen") as ws:  # keep the worker busy-free; no listeners needed
+        ws.receive_json()
+        client.portal.call(pipeline._sentences.put_nowait, ("Goedemorgen.", time.time(), "nl"))
+        client.portal.call(pipeline._sentences.put_nowait, ("I am from Kyiv.", time.time(), "en"))
+        for _ in range(50):
+            if len(fake.calls) >= 2:
+                break
+            time.sleep(0.05)
+    assert [c["Value"] for c in fake.calls] == ["[en] Goedemorgen.", "[en] Goedemorgen.\nI am from Kyiv."]
+
+    # Switching the spoken language to the vMix language hides the overlay (no translation needed).
+    settings["quick_languages"] = ["en"]
+    client.post("/api/admin/settings", json=settings)
+    client.post("/api/admin/speaker", json={"lang": "en"})
+    assert fake.calls[-2:] == [
+        {"Function": "SetText", "Input": "bbb-222", "SelectedName": "Headline.Text", "Value": ""},
+        {"Function": "OverlayInput7Out"},
+    ]

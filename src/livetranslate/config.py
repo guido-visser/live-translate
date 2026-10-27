@@ -59,15 +59,17 @@ class TranslationSettings(BaseModel):
 
 
 class VmixSettings(BaseModel):
-    """Dutch subtitles for testimonies, sent to a vMix Title input on the same PC."""
+    """Subtitles sent to a vMix Title input (via the vMix Web API)."""
 
     enabled: bool = False
     url: str = "http://127.0.0.1:8088"
     input: str = ""  # vMix input key
     field: str = ""  # text field in that title, e.g. "Headline.Text"
-    overlay: int = Field(1, ge=1, le=4)
+    # Language shown in vMix; empty = the main language. Speech in another language is translated.
+    language: str = ""
+    overlay: int = Field(1, ge=1, le=16)
     max_chars: int = Field(160, ge=20, le=1000)
-    # Switching the speaker to another language shows the overlay; back to the main language hides it.
+    # On a spoken-language switch: overlay in when vMix shows a translation, out when it shows the original.
     auto_overlay: bool = True
 
 

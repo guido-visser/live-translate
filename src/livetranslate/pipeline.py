@@ -171,12 +171,11 @@ class Pipeline:
         vmix = self.vmix
         if vmix is None or not vmix.active:
             return
-        if lang != self.source_language:
-            await vmix.clear()  # don't show the end of an earlier testimony
-            if vmix.settings.auto_overlay:
-                await vmix.overlay(True)
-        elif vmix.settings.auto_overlay:
-            await vmix.overlay(False)
+        await vmix.clear()  # a new speaker: don't show the previous one's words
+        if vmix.settings.auto_overlay:
+            # Show the overlay while vMix carries a translation, hide it when the
+            # speaker already speaks the vMix language.
+            await vmix.overlay(lang != self.vmix_language)
 
     def _broadcast_status(self) -> None:
         msg = {"type": "status", "running": self.state == "running", "paused": self.paused}
@@ -255,15 +254,16 @@ class Pipeline:
 
     # -- translation -----------------------------------------------------------
 
+    @property
+    def vmix_language(self) -> str:
+        """The language vMix shows (the main language unless another one is chosen)."""
+        return (self.vmix.settings.language if self.vmix else "") or self.source_language
+
     def wanted_languages(self, seg: Segment) -> set[str]:
         wanted = self.hub.active_languages() | self.speech.active_languages()
-        if self._vmix_wants(seg):
-            wanted.add(self.source_language)
+        if self.vmix is not None and self.vmix.active:
+            wanted.add(self.vmix_language)
         return wanted - {seg.lang}
-
-    def _vmix_wants(self, seg: Segment) -> bool:
-        """vMix shows the main-language translation while someone speaks another language."""
-        return self.vmix is not None and self.vmix.active and seg.lang != self.source_language
 
     async def _translate(self, seg: Segment, lang: str) -> str | None:
         if lang == seg.lang:
@@ -303,10 +303,11 @@ class Pipeline:
             if translated:
                 self.hub.to_language(lang, {"type": "segment", "id": seg.id, "text": translated, "lang": lang})
                 self.speech.say(lang, translated)
-        if self._vmix_wants(seg):
-            main = dict(zip(langs, results)).get(self.source_language)
-            if main:
-                await self.vmix.push(main)
+        if self.vmix is not None and self.vmix.active:
+            target = self.vmix_language
+            text = seg.source if target == seg.lang else dict(zip(langs, results)).get(target)
+            if text:
+                await self.vmix.push(text)
         self.stats["latency_s"] = round(time.time() - created, 2)
 
     def clear_translations(self) -> None:
