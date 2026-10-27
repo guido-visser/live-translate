@@ -19,6 +19,7 @@ Everything runs on one Windows, macOS or Linux computer. An NVIDIA GPU is recomm
 1. Download `LiveTranslate-Setup-<version>.exe` from the [Releases](../../releases) page (or build it, see below) and run it.
 2. Start **Live Translate** from the Start menu. The **first start downloads about 3 GB** (Python, the speech-recognition runtime, LibreTranslate, language models and voices), so do this once at home or before the service with internet. After that it works offline.
 3. The operator page opens in the browser at `http://127.0.0.1:8000/admin`.
+4. While it runs, Live Translate sits in the **system tray** (next to the clock) with a coloured icon: grey = stopped, blue = loading, green = translating, orange = paused or testimony. Hover for the status and number of listeners; click it to open the operator page; right-click for *Show QR code* and **Exit**. Starting Live Translate again while it runs just opens the operator page. Logs: `%LOCALAPPDATA%\LiveTranslate\livetranslate.log`.
 
 The installer adds a Windows Firewall rule for TCP port 8000 so phones can connect.
 
@@ -89,7 +90,7 @@ Data (models, logs, the LibreTranslate environment) lives in `%LOCALAPPDATA%\Liv
 ```bash
 uv sync
 uv run pytest
-uv run python -m livetranslate --port 8000
+uv run python -m livetranslate --port 8000   # --no-tray on a headless server
 ```
 
 Build the Windows installer (needs [Inno Setup 6](https://jrsoftware.org/isdl.php)):

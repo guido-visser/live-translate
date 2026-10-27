@@ -22,6 +22,8 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName=Live Translate
+SetupIconFile=LiveTranslate.ico
+UninstallDisplayIcon={app}\LiveTranslate.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -40,15 +42,17 @@ Source: "..\..\.python-version"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "bin\uv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "LiveTranslate.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LiveTranslate.vbs"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LiveTranslate.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Live Translate"; Filename: "{app}\LiveTranslate.cmd"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 13
-Name: "{autodesktop}\Live Translate"; Filename: "{app}\LiveTranslate.cmd"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 13; Tasks: desktopicon
+Name: "{group}\Live Translate"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\LiveTranslate.ico"
+Name: "{autodesktop}\Live Translate"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\LiveTranslate.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Live Translate"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Live Translate"" dir=in action=allow protocol=TCP localport=8000 profile=any"; Flags: runhidden
-Filename: "{app}\LiveTranslate.cmd"; Description: "{cm:LaunchProgram,Live Translate}"; Flags: postinstall nowait skipifsilent shellexec
+Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Description: "{cm:LaunchProgram,Live Translate}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Live Translate"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"

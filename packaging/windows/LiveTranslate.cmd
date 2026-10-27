@@ -31,5 +31,6 @@ if not exist "%MARKER%" (
     echo ok> "%MARKER%"
 )
 
-"%UV_PROJECT_ENVIRONMENT%\Scripts\python.exe" -m livetranslate %*
-if errorlevel 1 pause
+rem pythonw: no console window; the app shows itself as a tray icon and logs to
+rem %LOCALAPPDATA%\LiveTranslate\livetranslate.log
+start "" "%UV_PROJECT_ENVIRONMENT%\Scripts\pythonw.exe" -m livetranslate %*
