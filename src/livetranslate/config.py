@@ -51,6 +51,13 @@ class AsrSettings(BaseModel):
     max_sentence_s: float = 8.0
 
 
+class TranslationSettings(BaseModel):
+    engine: Literal["libretranslate", "nllb"] = "libretranslate"
+    nllb_model: Literal["600M", "1.3B"] = "600M"
+    # CPU by default so the GPU stays free for speech recognition and vMix.
+    nllb_device: Literal["cpu", "cuda", "auto"] = "cpu"
+
+
 class Settings(BaseModel):
     source_language: str = "nl"
     target_languages: list[str] = Field(default_factory=lambda: ["ru", "uk", "en"])
@@ -64,6 +71,7 @@ class Settings(BaseModel):
     # When set, use this LibreTranslate instead of starting one ourselves.
     libretranslate_url: str = ""
     libretranslate_port: int = 5001
+    translation: TranslationSettings = Field(default_factory=TranslationSettings)
     audio: AudioSettings = Field(default_factory=AudioSettings)
     asr: AsrSettings = Field(default_factory=AsrSettings)
 

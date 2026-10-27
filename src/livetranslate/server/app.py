@@ -16,7 +16,7 @@ from ..audio.devices import list_all
 from ..config import Settings, SettingsStore, data_dir as default_data_dir
 from ..languages import RTL, native_name
 from ..pipeline import Pipeline
-from ..translate.libretranslate import LibreTranslate
+from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
 from .hub import Connection, Hub
 from .network import GpuStats, lan_addresses, listener_url, qr_svg
@@ -33,7 +33,7 @@ class Services:
         self.store = store
         self.data = data
         self.hub = Hub()
-        self.translator = LibreTranslate(store.settings, data)
+        self.translator = TranslationService(store.settings, data)
         self.speech = SpeechService(data / "models" / "piper")
         self.speech.enabled = store.settings.tts_enabled
         self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data)
@@ -197,7 +197,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         return {
             "settings": s.model_dump(),
             "status": services.pipeline.status(),
-            "translator": {"status": tr.status, "detail": tr.detail, "needs_restart": tr.needs_restart},
+            "translator": translator_status(tr),
             "source_languages": sources,
             "target_languages": sorted(targets, key=lambda l: l["name"].lower()),
             "tts_languages": sorted(l for l in services.speech.bank_languages()),
@@ -225,9 +225,15 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         new.port = old.port  # the port only changes on restart (it is in the QR code)
         services.store.save(new)
         services.speech.enabled = new.tts_enabled
-        services.translator.configure(new)
-        if services.translator.needs_restart or new.libretranslate_url != old.libretranslate_url:
-            asyncio.create_task(services.translator.restart())
+        if new.translation != old.translation:
+            # Earlier sentences get re-translated by the new engine when someone asks for them.
+            services.pipeline.clear_translations()
+
+        async def apply_translation():
+            await services.translator.apply(old, new)
+            services.hub.to_listeners(services.languages_message())
+
+        asyncio.create_task(apply_translation())
         if (new.audio, new.asr, new.source_language) != (old.audio, old.asr, old.source_language):
             asyncio.create_task(services.pipeline.restart())
         services.hub.to_listeners(services.languages_message())
@@ -293,6 +299,10 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     return app
 
 
+def translator_status(tr: TranslationService) -> dict:
+    return {"engine": tr.engine, "status": tr.status, "detail": tr.detail, "needs_restart": tr.needs_restart}
+
+
 async def _start_translator(services: Services) -> None:
     await services.translator.start()
     services.hub.to_listeners(services.languages_message())
@@ -320,6 +330,6 @@ async def _admin_ticker(services: Services) -> None:
                 "audio_listeners": services.speech.listener_counts(),
                 "stats": services.pipeline.stats,
                 "gpu": gpu,
-                "translator": {"status": tr.status, "detail": tr.detail, "needs_restart": tr.needs_restart},
+                "translator": translator_status(tr),
             }
         )

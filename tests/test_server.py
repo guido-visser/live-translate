@@ -20,13 +20,27 @@ def client(tmp_path):
     store.save(Settings(target_languages=["ru", "uk"], tts_enabled=False))
     app = create_app(store, tmp_path, manage_translator=False)
     services = app.state.services
-    services.translator.languages = LANGUAGES
-    services.translator.status = "ready"
+    libre, nllb = services.translator.libre, services.translator.nllb
+    libre.languages = LANGUAGES
+    libre.status = "ready"
 
-    async def fake_translate(text, source, target):
+    async def fake_libre(text, source, target):
         return f"[{target}] {text}"
 
-    services.translator.translate = fake_translate
+    async def fake_nllb(text, source, target):
+        return f"[nllb {target}] {text}"
+
+    async def nothing():
+        pass
+
+    libre.translate = fake_libre
+    libre.restart = libre.stop = nothing
+    nllb.translate = fake_nllb
+
+    async def fake_nllb_start():
+        nllb.status = "ready"
+
+    nllb.start = fake_nllb_start
     with TestClient(app) as c:
         c.services = services
         yield c
@@ -83,6 +97,33 @@ def test_admin_state_and_settings_roundtrip(client):
     new_state = client.post("/api/admin/settings", json=settings).json()
     assert new_state["settings"]["wifi_name"] == "Kerk-Gasten"
     assert client.get("/api/public").json()["wifi"] == "Kerk-Gasten"
+
+
+def test_switching_to_nllb_retranslates_history(client):
+    pipeline = client.services.pipeline
+    with client.websocket_connect("/ws/listen") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "lang", "lang": "uk"})
+        receive_until(ws, "history")
+        client.portal.call(pipeline._sentences.put_nowait, ("Laten we bidden.", time.time()))
+        assert receive_until(ws, "segment")["text"] == "[uk] Laten we bidden."
+
+        settings = client.get("/api/admin/state").json()["settings"]
+        settings["translation"]["engine"] = "nllb"
+        client.post("/api/admin/settings", json=settings)
+        languages = receive_until(ws, "languages")
+        assert "uk" in [l["code"] for l in languages["languages"]]
+
+        state = client.get("/api/admin/state").json()
+        assert state["translator"] == {"engine": "nllb", "status": "ready", "detail": "", "needs_restart": False}
+        client.portal.call(pipeline._sentences.put_nowait, ("Amen.", time.time()))
+        assert receive_until(ws, "segment")["text"] == "[nllb uk] Amen."
+
+    with client.websocket_connect("/ws/listen") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "lang", "lang": "uk"})
+        texts = [s["text"] for s in receive_until(ws, "history")["segments"]]
+        assert texts == ["[nllb uk] Laten we bidden.", "[nllb uk] Amen."]
 
 
 def test_pause_is_broadcast(client):

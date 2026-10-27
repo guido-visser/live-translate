@@ -1,5 +1,6 @@
 window.ADMIN_I18N = {
   nl: {
+    engine: "Vertaalmachine", nllbModel: "NLLB-model", nllbSmall: "600M – snel (~0,6 GB)", nllbLarge: "1.3B – beter (~1,4 GB)", cpuRecommended: "CPU (aanbevolen)", engineHint: "NLLB vertaalt rechtstreeks (zonder omweg via Engels) en is veel beter voor Oekraïens. De eerste keer wordt het model gedownload.",
     start: "Start vertaling", stop: "Stop", pause: "Pauze (lied)", resume: "Hervatten",
     stopped: "Gestopt", loading: "Model laden…", running: "Bezig", paused: "Gepauzeerd",
     trReady: "Vertaler klaar", trStarting: "Vertaler start…", trInstalling: "Vertaler installeren…",
@@ -20,6 +21,7 @@ window.ADMIN_I18N = {
     statLatency: "Vertraging", statGpu: "GPU", uploadDone: "Bestand geüpload",
   },
   en: {
+    engine: "Translation engine", nllbModel: "NLLB model", nllbSmall: "600M – fast (~0.6 GB)", nllbLarge: "1.3B – better (~1.4 GB)", cpuRecommended: "CPU (recommended)", engineHint: "NLLB translates directly (no detour through English) and is much better for Ukrainian. The model downloads the first time.",
     start: "Start translation", stop: "Stop", pause: "Pause (song)", resume: "Resume",
     stopped: "Stopped", loading: "Loading model…", running: "Running", paused: "Paused",
     trReady: "Translator ready", trStarting: "Translator starting…", trInstalling: "Installing translator…",
@@ -40,6 +42,7 @@ window.ADMIN_I18N = {
     statLatency: "Delay", statGpu: "GPU", uploadDone: "File uploaded",
   },
   ru: {
+    engine: "Движок перевода", nllbModel: "Модель NLLB", nllbSmall: "600M – быстрая (~0,6 ГБ)", nllbLarge: "1.3B – лучше (~1,4 ГБ)", cpuRecommended: "CPU (рекомендуется)", engineHint: "NLLB переводит напрямую (без промежуточного английского) и гораздо лучше для украинского. Модель загружается при первом выборе.",
     start: "Начать перевод", stop: "Стоп", pause: "Пауза (песня)", resume: "Продолжить",
     stopped: "Остановлено", loading: "Загрузка модели…", running: "Работает", paused: "Пауза",
     trReady: "Переводчик готов", trStarting: "Запуск переводчика…", trInstalling: "Установка переводчика…",
@@ -60,6 +63,7 @@ window.ADMIN_I18N = {
     statLatency: "Задержка", statGpu: "GPU", uploadDone: "Файл загружен",
   },
   uk: {
+    engine: "Рушій перекладу", nllbModel: "Модель NLLB", nllbSmall: "600M – швидка (~0,6 ГБ)", nllbLarge: "1.3B – краща (~1,4 ГБ)", cpuRecommended: "CPU (рекомендовано)", engineHint: "NLLB перекладає напряму (без проміжної англійської) і значно краще для української. Модель завантажується під час першого вибору.",
     start: "Почати переклад", stop: "Стоп", pause: "Пауза (пісня)", resume: "Продовжити",
     stopped: "Зупинено", loading: "Завантаження моделі…", running: "Працює", paused: "Пауза",
     trReady: "Перекладач готовий", trStarting: "Запуск перекладача…", trInstalling: "Встановлення перекладача…",

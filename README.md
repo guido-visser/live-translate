@@ -34,6 +34,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run 
    * *File (test)*: play a recording to rehearse.
    Watch the level meter. Speech should be in the green/orange, not red.
 2. **Speaker's language** (default Dutch) and the **languages listeners may choose**. 🔊 marks languages that also have a voice.
+   **Translation engine**: choose *NLLB* for the best Ukrainian (see below); *LibreTranslate* is the lighter default.
 3. **Network**: check the address in the QR code is the PC's address on the *church Wi-Fi*. Enter the Wi-Fi name; it is shown on the QR page.
 4. Press **Start translation**. Open **Full-screen QR code** on a projector/screen, or print it.
 5. During songs press **Pause (song)** (or the space bar) so music isn't "translated".
@@ -52,7 +53,9 @@ Speech recognition shares the GPU. In *Speech recognition* pick a smaller **mode
 ## How it works
 
 * **Speech recognition**: [faster-whisper](https://github.com/SYSTRAN/faster-whisper). The audio is re-recognized every second; words two passes agree on are committed (LocalAgreement), and a sentence is released at punctuation or when the speaker pauses. Silero VAD skips silence and music. The typical delay is 1–3 s after the end of a sentence.
-* **Translation**: a private [LibreTranslate](https://github.com/LibreTranslate/LibreTranslate) the app installs and runs on `127.0.0.1:5001` (CPU only, so the GPU stays free). Only languages someone is actually reading or listening to are translated. You can also use an existing LibreTranslate server by putting its URL in `libretranslate_url` in the settings file.
+* **Translation**, two engines you can switch between on the operator page (only languages someone is actually reading or listening to are translated):
+  * **LibreTranslate**: a private [LibreTranslate](https://github.com/LibreTranslate/LibreTranslate) the app installs and runs on `127.0.0.1:5001` on the CPU. It goes through English (Dutch → English → Ukrainian). You can also use an existing LibreTranslate server by putting its URL in `libretranslate_url` in the settings file.
+  * **NLLB** ([Meta NLLB-200](https://huggingface.co/facebook/nllb-200-distilled-600M), run with CTranslate2): translates directly between 200 languages and is much better for Ukrainian. *600M* (~0.6 GB, ~0.6 s per sentence on the CPU) or *1.3B* (~1.4 GB, ~1 s, slightly better). It runs on the CPU by default so the GPU stays free for speech recognition and vMix. The model downloads the first time you select it. License: CC-BY-NC 4.0 (non-commercial use).
 * **Speech**: [Piper](https://github.com/OHF-Voice/piper1-gpl) voices (downloaded on demand), streamed per language as a continuous MP3 stream, only while someone listens.
 * **Privacy**: nothing is recorded or stored. Transcripts exist only in memory; only settings are saved (`%LOCALAPPDATA%\LiveTranslate\settings.json`).
 * **Admin protection**: the operator page only works on the PC itself. To control it from a tablet, set an admin PIN and open `http://<pc-address>:8000/admin?pin=<PIN>`.
@@ -61,7 +64,7 @@ Data (models, logs, the LibreTranslate environment) lives in `%LOCALAPPDATA%\Liv
 
 ## Known limitations
 
-* **Ukrainian translation quality**: LibreTranslate translates Dutch → English → Ukrainian, and its English → Ukrainian model is noticeably weaker than English → Russian. It sometimes produces Bible-like phrases that weren't said. Russian is good.
+* **Ukrainian with LibreTranslate**: its English → Ukrainian model is weak and sometimes produces Bible-like phrases that weren't said. Use the **NLLB** engine for Ukrainian.
 * **Phones and sleeping screens**: text needs the screen on. The page tries to keep it awake, but browsers only fully allow that over HTTPS. Spoken audio does keep playing with the screen off.
 * The first sentence after pressing Start can take longer while the model loads.
 

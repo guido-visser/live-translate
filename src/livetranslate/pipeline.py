@@ -17,7 +17,7 @@ from .audio.capture import AudioSource, FileSource, create_source
 from .config import SettingsStore
 from .server.hub import Hub
 from .stt.transcriber import StreamingTranscriber, WhisperEngine
-from .translate.libretranslate import LibreTranslate
+from .translate.service import TranslationService
 from .tts.piper import SpeechService
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class Pipeline:
     def __init__(
         self,
         store: SettingsStore,
-        translator: LibreTranslate,
+        translator: TranslationService,
         speech: SpeechService,
         hub: Hub,
         data_dir: Path,
@@ -239,6 +239,10 @@ class Pipeline:
                     self.hub.to_language(lang, {"type": "segment", "id": seg.id, "text": translated, "lang": lang})
                     self.speech.say(lang, translated)
             self.stats["latency_s"] = round(time.time() - created, 2)
+
+    def clear_translations(self) -> None:
+        for seg in self.history:
+            seg.translations.clear()
 
     async def history_for(self, lang: str, limit: int = 15) -> list[dict]:
         segments = list(self.history)[-limit:]

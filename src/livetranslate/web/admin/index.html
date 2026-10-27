@@ -112,6 +112,31 @@
 
         <fieldset>
           <legend data-t="translation"></legend>
+          <div class="row">
+            <label for="engine" data-t="engine"></label>
+            <select id="engine">
+              <option value="libretranslate">LibreTranslate</option>
+              <option value="nllb">NLLB (Meta)</option>
+            </select>
+          </div>
+          <div id="nllbRows">
+            <div class="row">
+              <label for="nllbModel" data-t="nllbModel"></label>
+              <select id="nllbModel">
+                <option value="600M" data-t="nllbSmall"></option>
+                <option value="1.3B" data-t="nllbLarge"></option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="nllbDevice" data-t="processor"></label>
+              <select id="nllbDevice">
+                <option value="cpu" data-t="cpuRecommended"></option>
+                <option value="cuda">GPU (NVIDIA)</option>
+                <option value="auto" data-t="auto"></option>
+              </select>
+            </div>
+          </div>
+          <p class="muted small" data-t="engineHint"></p>
           <p class="muted small" data-t="targetsHint"></p>
           <div id="targets" class="targets"></div>
           <label class="check"><input id="tts" type="checkbox"> <span data-t="tts"></span></label>

@@ -53,7 +53,8 @@
     pill.className = `pill ${key}`;
 
     const trKey = { ready: "trReady", starting: "trStarting", installing: "trInstalling", error: "trError" }[translator.status] || "trStopped";
-    $("trPill").textContent = translator.needs_restart && translator.status === "ready" ? t("trRestart") : t(trKey);
+    const engine = translator.engine === "nllb" ? "NLLB" : "LibreTranslate";
+    $("trPill").textContent = `${engine}: ${translator.needs_restart && translator.status === "ready" ? t("trRestart") : t(trKey)}`;
     $("trPill").className = `pill tr-${translator.status}`;
     $("trDetail").textContent = translator.detail || "";
     $("trDetail").hidden = !translator.detail;
@@ -242,6 +243,11 @@
     } else e.target.value = "";
   });
 
+  function renderEngine() {
+    $("nllbRows").hidden = $("engine").value !== "nllb";
+  }
+  $("engine").addEventListener("change", renderEngine);
+
   function renderTargets() {
     const box = $("targets");
     box.textContent = "";
@@ -280,6 +286,10 @@
     model.value = s.asr.model;
     $("asrDevice").value = s.asr.device;
 
+    $("engine").value = s.translation.engine;
+    $("nllbModel").value = s.translation.nllb_model;
+    $("nllbDevice").value = s.translation.nllb_device;
+    renderEngine();
     renderTargets();
     $("tts").checked = s.tts_enabled;
     renderAddresses();
@@ -299,6 +309,9 @@
     s.source_language = $("sourceLang").value;
     s.asr.model = $("model").value;
     s.asr.device = $("asrDevice").value;
+    s.translation.engine = $("engine").value;
+    s.translation.nllb_model = $("nllbModel").value;
+    s.translation.nllb_device = $("nllbDevice").value;
     s.target_languages = [...$("targets").querySelectorAll("input:checked")].map((i) => i.value);
     s.tts_enabled = $("tts").checked;
     s.public_host = $("address").value === "__custom" ? "" : $("address").value;
@@ -351,10 +364,11 @@
         status = msg.status;
         translator = msg.translator;
         renderStatus();
-        if (translator.status !== lastTranslatorStatus) {
+        const trKey = `${translator.engine}:${translator.status}`;
+        if (trKey !== lastTranslatorStatus) {
           // Languages become known once the translator is ready.
           if (lastTranslatorStatus !== null && translator.status === "ready" && !formDirty) loadState();
-          lastTranslatorStatus = translator.status;
+          lastTranslatorStatus = trKey;
         }
       } else if (msg.type === "status") {
         status = msg;
