@@ -16,7 +16,7 @@ from ..audio.devices import list_all
 from ..config import Settings, SettingsStore, data_dir as default_data_dir
 from ..integrations.vmix import VmixOutput
 from ..languages import RTL, native_name
-from ..pipeline import Pipeline
+from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
 from .hub import Connection, Hub
@@ -115,6 +115,14 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
         return FileResponse(WEB / "admin" / "index.html", headers={"Cache-Control": "no-cache"})
 
+    @app.get("/admin/settings", include_in_schema=False)
+    async def settings_page(request: Request):
+        try:
+            require_admin(request)
+        except HTTPException as exc:
+            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+        return FileResponse(WEB / "admin" / "settings.html", headers={"Cache-Control": "no-cache"})
+
     @app.get("/qr", include_in_schema=False)
     async def qr_page():
         return FileResponse(WEB / "admin" / "qr.html", headers={"Cache-Control": "no-cache"})
@@ -200,6 +208,9 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         return {
             "settings": s.model_dump(),
             "status": services.pipeline.status(),
+            "quick_language_options": [
+                l for l in sources if l["code"] in WHISPER_LANGUAGES and l["code"] != source
+            ],
             "speaker_languages": [
                 {"code": c, "name": native_name(c, tr.name_of(c))} for c in services.pipeline.speaker_languages()
             ],

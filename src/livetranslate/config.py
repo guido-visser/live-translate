@@ -74,6 +74,8 @@ class VmixSettings(BaseModel):
 class Settings(BaseModel):
     source_language: str = "nl"
     target_languages: list[str] = Field(default_factory=lambda: ["ru", "uk", "en"])
+    # Languages offered as quick "spoken language" buttons next to the main language.
+    quick_languages: list[str] = Field(default_factory=lambda: ["ru", "uk"])
     tts_enabled: bool = True
     port: int = 8000
     # Override for the address in the QR code (e.g. when the PC has several networks).

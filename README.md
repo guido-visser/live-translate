@@ -9,7 +9,7 @@ Mixer / mic / livestream audio ──► Whisper speech recognition (GPU) ──
                                       ◄── optional spoken translation (Piper) ◄┘
 ```
 
-* **Operator (the PC):** start the app, pick the audio input, press **Start**. Press **Pause** (or the space bar) during songs.
+* **Operator (the PC):** start the app, pick the audio input, press **Start**. **Pause** (or the space bar) stops translating temporarily.
 * **Listeners:** scan the QR code, choose a language, read along. Tap **Listen** to hear the translation through earphones. The audio keeps playing with the screen off.
 
 Everything runs on one Windows, macOS or Linux computer. An NVIDIA GPU is recommended; it can be the livestream PC that also runs vMix/OBS.
@@ -27,38 +27,39 @@ The installer adds a Windows Firewall rule for TCP port 8000 so phones can conne
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run `start.cmd` (Windows) or `./start.sh` (macOS/Linux).
 
-## Using it on Sunday
+## Using it
 
-1. **Audio source** – choose:
-   * *Input device*: the audio interface or mixer feed (best quality). For a multi-channel interface pick the channel that carries the speaker.
-   * *System audio*: what the PC is playing (Windows WASAPI loopback). On macOS use [BlackHole](https://github.com/ExistentialAudio/BlackHole); on Linux choose the "Monitor of …" input.
-   * *File (test)*: play a recording to rehearse.
-   Watch the level meter. Speech should be in the green/orange, not red.
-2. **Speaker's language** (default Dutch) and the **languages listeners may choose**. 🔊 marks languages that also have a voice.
-   **Translation engine**: choose *NLLB* for the best Ukrainian (see below); *LibreTranslate* is the lighter default.
-3. **Network**: check the address in the QR code is the PC's address on the *church Wi-Fi*. Enter the Wi-Fi name; it is shown on the QR page.
-4. Press **Start translation**. Open **Full-screen QR code** on a projector/screen, or print it.
-5. During songs press **Pause (song)** (or the space bar) so music isn't "translated".
+The operator page has the controls needed during a service; everything else is under **⚙ Settings**.
 
-### Testimonies in Russian or Ukrainian (with Dutch subtitles in vMix)
+**Main screen**
 
-When someone speaks another language at the microphone, switch the **speaker language** with the buttons under *Start* (or the number keys `1`, `2`, `3`…). Switching takes effect immediately, without reloading the model:
+* **Start / Stop translating** and **Pause** (also the space bar).
+* **Spoken language**: the main language plus the quick languages (keys `1`, `2`, `3`…). Switching is immediate.
+* **Level meter**, **live transcript**, **listeners** per language and **performance** figures.
+* **vMix**: *Send translated text to vMix* and *Overlay* switches.
+* **QR code** (header): the code people scan, with a full-screen option for a projector.
 
-* Phones get the original speech in that language, and translations in all other languages (including Dutch for Dutch listeners).
-* An orange **Testimony** label at the top shows a non-main language is active. Switch back to *Nederlands* (`1`) when the testimony ends.
+**Settings** (tabs)
 
-**Dutch subtitles in vMix** (on the same PC):
+* **Audio**: input device and channel, system audio (Windows loopback; BlackHole on macOS, "Monitor of …" on Linux) or a file; gain; speech-recognition model and processor.
+* **Languages**: main language, languages listeners can choose (🔊 = has a voice), spoken translation, translation engine (LibreTranslate or NLLB).
+* **Quick languages**: which spoken languages appear as buttons on the main screen.
+* **vMix**: Web Controller address, title input and text field, overlay channel, maximum characters, overlay switching with the spoken language, test text.
+* **Network**: address in the QR code, Wi-Fi name (shown with the QR code), admin PIN, port.
 
-1. In vMix, open **Settings → Web Controller** and enable it (port 8088).
-2. Add a **Title** input for the subtitles (e.g. a lower-third with one text field that can hold two lines).
-3. In Live Translate's **vMix** card: tick *Send Dutch subtitles*, press **↻**, then choose the title input, the text field and the overlay channel. Press **Save**.
-4. Use **Test text** and **Overlay on/off** to check it.
+### Spoken language and vMix
 
-During a testimony the Dutch translation appears as rolling subtitles (previous + current sentence, limited by *Max. characters*). With *Overlay automatically* ticked, switching to Russian/Ukrainian clears the title and brings the overlay in; switching back to Dutch takes it out. The overlay buttons always work manually too.
+When the spoken language is not the main language (for example a testimony in Russian):
+
+* Phones get the original speech in that language and translations in the other languages.
+* With *Send translated text to vMix* on, the main-language translation goes to the chosen vMix title as rolling subtitles (previous + current sentence, limited by *Max. characters*).
+* With *Switch overlay with the spoken language* on, switching away from the main language clears the title and brings the overlay in; switching back takes it out. The *Overlay* switch on the main screen works at any time.
+
+vMix setup: enable **Settings → Web Controller** in vMix (port 8088), add a Title input, then select it in Live Translate under **Settings → vMix**.
 
 ### If vMix/OBS starts dropping frames
 
-Speech recognition shares the GPU. In *Speech recognition* pick a smaller **model** (`medium` or `small`) or set **Run on** to *CPU*. Changes apply immediately. The *Performance* panel shows GPU load, memory and the delay.
+Speech recognition shares the GPU. Under **Settings → Audio** pick a smaller speech-recognition **model** (`medium` or `small`) or set **Run on** to *CPU*. Changes apply immediately. The *Performance* panel shows GPU load, memory and the delay.
 
 | Model | GPU memory (approx.) | Quality |
 |---|---|---|

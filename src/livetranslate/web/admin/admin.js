@@ -1,50 +1,15 @@
 (() => {
   "use strict";
 
-  const $ = (id) => document.getElementById(id);
-  const pin = new URLSearchParams(location.search).get("pin");
-  const withPin = (url) => (pin ? `${url}${url.includes("?") ? "&" : "?"}pin=${encodeURIComponent(pin)}` : url);
+  const { $, t, api, withPin } = window.LT;
 
-  let uiLang = "nl";
-  try { uiLang = localStorage.getItem("lt.admin.lang") || "nl"; } catch { /* ignore */ }
   let state = null; // last /api/admin/state
-  let devices = [];
   let status = { state: "stopped", paused: false, error: "" };
   let translator = { status: "stopped", detail: "", needs_restart: false };
-  let formDirty = false;
+  let vmix = { ok: null, error: "", last_text: "", overlay: null };
+  let lastTranslatorKey = null;
 
-  const t = (key) => (window.ADMIN_I18N[uiLang] || window.ADMIN_I18N.en)[key] || window.ADMIN_I18N.en[key] || key;
-
-  async function api(path, options = {}) {
-    const res = await fetch(withPin(path), {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
-    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-    return res.json();
-  }
-
-  // -- texts ---------------------------------------------------------------------
-
-  function applyTexts() {
-    document.documentElement.lang = uiLang;
-    $("uiLang").value = uiLang;
-    document.querySelectorAll("[data-t]").forEach((el) => (el.textContent = t(el.dataset.t)));
-    renderStatus();
-    if (state) {
-      renderChannelOptions();
-      renderAddresses();
-    }
-  }
-
-  $("uiLang").addEventListener("change", (e) => {
-    uiLang = e.target.value;
-    try { localStorage.setItem("lt.admin.lang", uiLang); } catch { /* ignore */ }
-    applyTexts();
-    renderListeners({}, {});
-  });
-
-  // -- status & controls ---------------------------------------------------------
+  // -- status & controls -----------------------------------------------------------
 
   function renderStatus() {
     const pill = $("statePill");
@@ -71,7 +36,17 @@
     renderSpeakers();
   }
 
-  // -- speaker language (testimonies) -------------------------------------------------
+  $("startBtn").addEventListener("click", async () => {
+    await api(status.state === "stopped" ? "/api/admin/start" : "/api/admin/stop", { method: "POST" });
+  });
+
+  $("pauseBtn").addEventListener("click", async () => {
+    const res = await api("/api/admin/pause", { method: "POST", body: JSON.stringify({ paused: !status.paused }) });
+    status.paused = res.paused;
+    renderStatus();
+  });
+
+  // -- spoken language -------------------------------------------------------------
 
   function mainLanguage() {
     return state?.settings.source_language;
@@ -81,8 +56,9 @@
     const box = $("speakerButtons");
     const langs = state?.speaker_languages || [];
     const current = status.speaker_language || mainLanguage();
-    if (box.dataset.langs !== langs.map((l) => l.code).join()) {
-      box.dataset.langs = langs.map((l) => l.code).join();
+    const signature = langs.map((l) => `${l.code}:${l.name}`).join();
+    if (box.dataset.langs !== signature) {
+      box.dataset.langs = signature;
       box.textContent = "";
       langs.forEach((lang, i) => {
         const b = document.createElement("button");
@@ -101,10 +77,6 @@
       b.classList.toggle("foreign", b.dataset.lang !== mainLanguage());
       b.setAttribute("aria-checked", String(active));
     });
-    const pill = $("speakerPill");
-    const foreign = current && current !== mainLanguage();
-    pill.hidden = !foreign;
-    if (foreign) pill.textContent = `${t("testimony")}: ${langs.find((l) => l.code === current)?.name || current}`;
   }
 
   async function setSpeaker(lang) {
@@ -113,166 +85,111 @@
     renderSpeakers();
     try {
       const res = await api("/api/admin/speaker", { method: "POST", body: JSON.stringify({ lang }) });
-      renderVmixStatus(res.vmix);
+      renderVmix(res.vmix);
     } catch (err) {
       $("error").textContent = err.message;
       $("error").hidden = false;
     }
   }
 
-  // Number keys 1–9 pick the speaker language.
+  const typing = () => ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
+
   document.addEventListener("keydown", (e) => {
-    if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName) || e.ctrlKey || e.altKey || e.metaKey) return;
-    const index = Number(e.key) - 1;
-    const lang = state?.speaker_languages?.[index];
-    if (Number.isInteger(index) && lang) setSpeaker(lang.code);
+    if (typing() || e.ctrlKey || e.altKey || e.metaKey || $("qrDialog").open) return;
+    if (e.code === "Space" && document.activeElement.tagName !== "BUTTON") {
+      e.preventDefault();
+      if (!$("pauseBtn").disabled) $("pauseBtn").click();
+      return;
+    }
+    const lang = state?.speaker_languages?.[Number(e.key) - 1];
+    if (lang) setSpeaker(lang.code);
   });
 
-  // -- vMix ---------------------------------------------------------------------------
+  // -- vMix quick panel ------------------------------------------------------------
 
-  let vmixState = null; // inputs as reported by vMix
-
-  function fillVmix() {
-    const v = state.settings.vmix;
-    $("vmixEnabled").checked = v.enabled;
-    $("vmixUrl").value = v.url;
-    $("vmixOverlay").value = String(v.overlay);
-    $("vmixMaxChars").value = v.max_chars;
-    $("vmixAuto").checked = v.auto_overlay;
-    renderVmixInputs();
-    renderVmixStatus(state.vmix);
+  function vmixConfigured() {
+    const v = state?.settings.vmix;
+    return Boolean(v && v.input && v.field);
   }
 
-  function renderVmixInputs() {
-    const v = state.settings.vmix;
-    const select = $("vmixInput");
-    const wanted = select.value || v.input;
-    select.textContent = "";
-    select.appendChild(new Option("—", ""));
-    for (const input of vmixState?.inputs || []) {
-      select.appendChild(new Option(`${input.number}. ${input.title}`, input.key));
-    }
-    if (wanted && ![...select.options].some((o) => o.value === wanted)) {
-      select.appendChild(new Option(`${t("vmixSavedInput")} (${wanted.slice(0, 8)}…)`, wanted));
-    }
-    select.value = wanted || "";
-    renderVmixFields();
+  function setSwitch(el, on, disabled) {
+    el.setAttribute("aria-checked", String(Boolean(on)));
+    el.classList.toggle("on", Boolean(on));
+    el.disabled = Boolean(disabled);
   }
 
-  function renderVmixFields() {
-    const v = state.settings.vmix;
-    const select = $("vmixField");
-    const wanted = select.value || v.field;
-    const input = (vmixState?.inputs || []).find((i) => i.key === $("vmixInput").value);
-    const fields = input ? input.fields : wanted ? [wanted] : [];
-    select.textContent = "";
-    for (const f of fields) select.appendChild(new Option(f, f));
-    if (fields.includes(wanted)) select.value = wanted;
-  }
-
-  function renderVmixStatus(s) {
-    if (!s) return;
+  function renderVmix(s) {
+    if (s) vmix = s;
+    if (!state) return;
+    const configured = vmixConfigured();
+    setSwitch($("vmixSend"), state.settings.vmix.enabled, !configured);
+    setSwitch($("vmixOverlay"), vmix.overlay === true, !configured);
     const el = $("vmixStatus");
-    if (s.ok === true) {
+    if (!configured) {
+      el.className = "small muted";
+      el.textContent = t("vmixNotConfigured");
+    } else if (vmix.ok === true) {
       el.className = "small vmix-ok";
-      el.textContent = t("vmixOk") + (s.overlay === true ? ` · ${t("overlayShown")}` : s.overlay === false ? ` · ${t("overlayHidden")}` : "");
-    } else if (s.ok === false) {
+      el.textContent = t("vmixOk");
+    } else if (vmix.ok === false) {
       el.className = "small vmix-error";
-      el.textContent = `${t("vmixError")}: ${s.error}`;
+      el.textContent = `${t("vmixError")}: ${vmix.error}`;
     } else {
       el.className = "small muted";
       el.textContent = t("vmixUnknown");
     }
-    $("vmixLast").textContent = s.last_text || "";
-    $("vmixLast").hidden = !s.last_text;
+    $("vmixLast").textContent = vmix.last_text || "";
+    $("vmixLast").hidden = !vmix.last_text;
   }
 
-  async function refreshVmix() {
-    // Ask the server to talk to the address typed in, even before it is saved.
-    if ($("vmixUrl").value.trim() !== state.settings.vmix.url) await saveSettings();
+  $("vmixSend").addEventListener("click", async () => {
+    const settings = structuredClone(state.settings);
+    settings.vmix.enabled = !settings.vmix.enabled;
+    state = await window.LT.saveSettings(settings);
+    renderVmix();
+  });
+
+  $("vmixOverlay").addEventListener("click", async () => {
     try {
-      vmixState = await api("/api/admin/vmix/inputs");
-      renderVmixStatus({ ...(state.vmix || {}), ok: true, error: "" });
+      renderVmix(await api("/api/admin/vmix/overlay", { method: "POST", body: JSON.stringify({ on: vmix.overlay !== true }) }));
     } catch (err) {
-      vmixState = null;
-      renderVmixStatus({ ok: false, error: err.message.replace(/^\d+ /, "") });
-    }
-    renderVmixInputs();
-  }
-
-  async function vmixAction(path, body) {
-    if (formDirty) await saveSettings();
-    try {
-      renderVmixStatus(await api(path, { method: "POST", body: JSON.stringify(body) }));
-    } catch (err) {
-      renderVmixStatus({ ok: false, error: err.message.replace(/^\d+ /, "") });
-    }
-  }
-
-  $("vmixRefresh").addEventListener("click", refreshVmix);
-  $("vmixInput").addEventListener("change", () => { $("vmixField").value = ""; renderVmixFields(); });
-  $("overlayOn").addEventListener("click", () => vmixAction("/api/admin/vmix/overlay", { on: true }));
-  $("overlayOff").addEventListener("click", () => vmixAction("/api/admin/vmix/overlay", { on: false }));
-  $("vmixTest").addEventListener("click", () => vmixAction("/api/admin/vmix/test", { text: t("vmixTestText") }));
-  document.querySelector(".vmix-card").addEventListener("input", () => { formDirty = true; $("vmixSaved").hidden = true; });
-  $("vmixSave").addEventListener("click", async () => {
-    await saveSettings();
-    $("vmixSaved").textContent = t("saved");
-    $("vmixSaved").hidden = false;
-  });
-
-  $("startBtn").addEventListener("click", async () => {
-    if (status.state === "stopped") {
-      if (formDirty) await saveSettings();
-      await api("/api/admin/start", { method: "POST" });
-    } else {
-      await api("/api/admin/stop", { method: "POST" });
+      renderVmix({ ...vmix, ok: false, error: err.message });
     }
   });
 
-  $("pauseBtn").addEventListener("click", async () => {
-    const res = await api("/api/admin/pause", { method: "POST", body: JSON.stringify({ paused: !status.paused }) });
-    status.paused = res.paused;
-    renderStatus();
-  });
+  // -- QR dialog -------------------------------------------------------------------
 
-  // Space bar toggles pause: handy during a service.
-  document.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && !["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(document.activeElement.tagName)) {
-      e.preventDefault();
-      if (!$("pauseBtn").disabled) $("pauseBtn").click();
-    }
-  });
-
-  // -- QR ----------------------------------------------------------------------------
-
-  function renderShare() {
+  $("qrBtn").addEventListener("click", () => {
     $("qrImg").src = withPin(`/api/qr.svg?t=${Date.now()}`);
-    $("url").textContent = state.url;
-    $("url").href = state.url;
-    const wifi = state.settings.wifi_name;
-    $("wifiLine").textContent = wifi ? `${t("wifiPrefix")} ${wifi}` : "";
-  }
+    $("url").textContent = state?.url || "";
+    $("url").href = state?.url || "#";
+    const wifi = state?.settings.wifi_name;
+    $("wifiLine").textContent = wifi ? `Wi-Fi: ${wifi}` : "";
+    $("qrDialog").showModal();
+  });
+  $("qrClose").addEventListener("click", () => $("qrDialog").close());
   $("qrFull").addEventListener("click", () => window.open("/qr", "qr", "width=900,height=900"));
+  $("qrDialog").addEventListener("click", (e) => { if (e.target === $("qrDialog")) $("qrDialog").close(); });
 
-  // -- listeners, transcript, stats -------------------------------------------------
+  // -- transcript, listeners, stats, level -------------------------------------------
 
   function langName(code) {
     const all = [...(state?.target_languages || []), ...(state?.source_languages || [])];
     return all.find((l) => l.code === code)?.name || code;
   }
 
-  function renderListeners(text, audio) {
+  function renderListeners(text = {}, audio = {}) {
     const rows = $("listenerRows");
     rows.textContent = "";
     const langs = [...new Set([...Object.keys(text), ...Object.keys(audio)])].sort();
     if (!langs.length) {
-      rows.innerHTML = `<tr><td class="muted">${t("none")}</td></tr>`;
+      rows.innerHTML = `<tr><td class="muted"></td></tr>`;
+      rows.querySelector("td").textContent = t("none");
       return;
     }
     for (const lang of langs) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td></td><td class="num"></td><td class="num"></td>`;
+      tr.innerHTML = "<td></td><td class=\"num\"></td><td class=\"num\"></td>";
       tr.children[0].textContent = langName(lang);
       tr.children[1].textContent = `${text[lang] || 0} ${t("text")}`;
       tr.children[2].textContent = audio[lang] ? `${audio[lang]} ${t("audioCol")}` : "";
@@ -280,11 +197,15 @@
     }
   }
 
-  function addTranscript(text) {
+  function addTranscript(text, lang) {
     const box = $("transcript");
     const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
     const p = document.createElement("p");
     p.textContent = text;
+    if (lang && lang !== mainLanguage()) {
+      p.classList.add("foreign");
+      p.dataset.lang = lang.toUpperCase();
+    }
     box.appendChild(p);
     while (box.children.length > 100) box.firstChild.remove();
     if (stick) box.scrollTop = box.scrollHeight;
@@ -310,231 +231,42 @@
     $("levelText").textContent = db <= -119 ? "–∞ dB" : `${db.toFixed(0)} dB`;
   }
 
-  // -- settings form -------------------------------------------------------------------
-
-  const form = $("settingsForm");
-  form.addEventListener("input", () => { formDirty = true; $("saved").hidden = true; });
-
-  function kind() {
-    return form.querySelector("input[name=kind]:checked")?.value || "device";
-  }
-
-  function renderDevices() {
-    const select = $("device");
-    const k = kind();
-    const list = devices.filter((d) => d.kind === (k === "loopback" ? "loopback" : "device"));
-    select.textContent = "";
-    for (const d of list) {
-      const o = document.createElement("option");
-      o.value = d.id;
-      o.textContent = `${d.name} — ${d.host_api}${d.is_default ? " ★" : ""}`;
-      o.dataset.channels = d.channels;
-      select.appendChild(o);
-    }
-    const saved = state.settings.audio.device;
-    if (saved && list.some((d) => d.id === saved)) select.value = saved;
-    else {
-      const def = list.find((d) => d.is_default) || list[0];
-      if (def) select.value = def.id;
-    }
-    renderChannelOptions();
-  }
-
-  function renderChannelOptions() {
-    const select = $("channel");
-    const current = select.value || String(state.settings.audio.channel);
-    const channels = Number($("device").selectedOptions[0]?.dataset.channels || 2);
-    select.textContent = "";
-    const mix = new Option(t("mix"), "0");
-    select.appendChild(mix);
-    for (let i = 1; i <= channels; i++) select.appendChild(new Option(String(i), String(i)));
-    select.value = [...select.options].some((o) => o.value === current) ? current : "0";
-  }
-
-  function renderKind() {
-    const k = kind();
-    $("deviceRow").hidden = k === "file";
-    $("channelRow").hidden = k === "file";
-    $("fileRow").hidden = k !== "file";
-    renderDevices();
-  }
-
-  form.querySelectorAll("input[name=kind]").forEach((r) => r.addEventListener("change", renderKind));
-  $("device").addEventListener("change", renderChannelOptions);
-  $("gain").addEventListener("input", () => ($("gainText").textContent = `${$("gain").value}×`));
-  $("refreshDevices").addEventListener("click", loadDevices);
-
-  $("fileUpload").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const res = await fetch(withPin(`/api/admin/upload?name=${encodeURIComponent(file.name)}`), { method: "POST", body: file });
-    const data = await res.json();
-    $("filePath").value = data.path;
-    formDirty = true;
-    $("saved").textContent = t("uploadDone");
-    $("saved").hidden = false;
-  });
-
-  function renderAddresses() {
-    const select = $("address");
-    const current = state.settings.public_host;
-    select.textContent = "";
-    for (const ip of state.addresses) select.appendChild(new Option(ip, ip === state.addresses[0] ? "" : ip));
-    if (current && !state.addresses.includes(current)) select.appendChild(new Option(current, current));
-    select.appendChild(new Option(t("custom"), "__custom"));
-    select.value = current && state.addresses[0] !== current ? current : "";
-  }
-
-  $("address").addEventListener("change", (e) => {
-    if (e.target.value !== "__custom") return;
-    const value = prompt(t("address"), state.settings.public_host || "");
-    if (value) {
-      e.target.add(new Option(value, value), e.target.options.length - 1);
-      e.target.value = value;
-    } else e.target.value = "";
-  });
-
-  function renderEngine() {
-    $("nllbRows").hidden = $("engine").value !== "nllb";
-  }
-  $("engine").addEventListener("change", renderEngine);
-
-  function renderTargets() {
-    const box = $("targets");
-    box.textContent = "";
-    const chosen = new Set(state.settings.target_languages);
-    const tts = new Set(state.tts_languages);
-    const options = state.target_languages.length
-      ? state.target_languages
-      : state.settings.target_languages.map((code) => ({ code, name: code }));
-    for (const lang of options) {
-      const label = document.createElement("label");
-      label.className = "check";
-      label.innerHTML = `<input type="checkbox" value="${lang.code}"> <span></span>`;
-      label.querySelector("input").checked = chosen.has(lang.code);
-      label.querySelector("span").textContent = `${lang.name}${tts.has(lang.code) ? " 🔊" : ""}`;
-      box.appendChild(label);
-    }
-  }
-
-  function fillForm() {
-    const s = state.settings;
-    form.querySelector(`input[name=kind][value=${s.audio.kind}]`).checked = true;
-    $("filePath").value = s.audio.file_path;
-    $("gain").value = s.audio.gain;
-    $("gainText").textContent = `${s.audio.gain}×`;
-    $("channel").value = String(s.audio.channel);
-
-    const src = $("sourceLang");
-    src.textContent = "";
-    const sources = state.source_languages.length ? state.source_languages : [{ code: s.source_language, name: s.source_language }];
-    for (const l of sources) src.appendChild(new Option(l.name, l.code));
-    src.value = s.source_language;
-
-    const model = $("model");
-    model.textContent = "";
-    for (const m of state.models) model.appendChild(new Option(m, m));
-    model.value = s.asr.model;
-    $("asrDevice").value = s.asr.device;
-
-    $("engine").value = s.translation.engine;
-    $("nllbModel").value = s.translation.nllb_model;
-    $("nllbDevice").value = s.translation.nllb_device;
-    renderEngine();
-    renderTargets();
-    $("tts").checked = s.tts_enabled;
-    renderAddresses();
-    $("wifi").value = s.wifi_name;
-    $("pin").value = s.admin_pin;
-    renderKind();
-    fillVmix();
-    formDirty = false;
-  }
-
-  function collectSettings() {
-    const s = structuredClone(state.settings);
-    s.audio.kind = kind();
-    s.audio.device = s.audio.kind === "file" ? s.audio.device : $("device").value || null;
-    s.audio.channel = Number($("channel").value || 0);
-    s.audio.file_path = $("filePath").value.trim();
-    s.audio.gain = Number($("gain").value);
-    s.source_language = $("sourceLang").value;
-    s.asr.model = $("model").value;
-    s.asr.device = $("asrDevice").value;
-    s.translation.engine = $("engine").value;
-    s.translation.nllb_model = $("nllbModel").value;
-    s.translation.nllb_device = $("nllbDevice").value;
-    s.target_languages = [...$("targets").querySelectorAll("input:checked")].map((i) => i.value);
-    s.tts_enabled = $("tts").checked;
-    s.public_host = $("address").value === "__custom" ? "" : $("address").value;
-    s.wifi_name = $("wifi").value.trim();
-    s.admin_pin = $("pin").value.trim();
-    s.vmix.enabled = $("vmixEnabled").checked;
-    s.vmix.url = $("vmixUrl").value.trim() || "http://127.0.0.1:8088";
-    s.vmix.input = $("vmixInput").value;
-    s.vmix.field = $("vmixField").value;
-    s.vmix.overlay = Number($("vmixOverlay").value);
-    s.vmix.max_chars = Math.max(20, Math.min(1000, Number($("vmixMaxChars").value) || 160));
-    s.vmix.auto_overlay = $("vmixAuto").checked;
-    return s;
-  }
-
-  async function saveSettings() {
-    state = await api("/api/admin/settings", { method: "POST", body: JSON.stringify(collectSettings()) });
-    fillForm();
-    renderShare();
-    $("saved").textContent = t("saved");
-    $("saved").hidden = false;
-  }
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    await saveSettings();
-  });
-
-  // -- data loading & live updates --------------------------------------------------------
-
-  async function loadDevices() {
-    devices = await api("/api/admin/devices");
-    if (state) renderDevices();
-  }
+  // -- loading & live updates --------------------------------------------------------
 
   async function loadState() {
     state = await api("/api/admin/state");
     status = state.status;
     translator = state.translator;
-    fillForm();
-    renderShare();
     renderStatus();
+    renderVmix(state.vmix);
     $("transcript").textContent = "";
-    for (const seg of state.history) addTranscript(seg.text);
+    for (const seg of state.history) addTranscript(seg.text, seg.lang);
   }
 
-  let lastTranslatorStatus = null;
-
   function connect() {
-    const ws = new WebSocket(withPin(`ws://${location.host}/ws/admin`));
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(withPin(`${proto}://${location.host}/ws/admin`));
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === "tick") {
         renderLevel(msg.level_db);
         renderListeners(msg.listeners, msg.audio_listeners);
         renderStats(msg.stats, msg.gpu);
-        renderVmixStatus(msg.vmix);
         status = msg.status;
         translator = msg.translator;
         renderStatus();
-        const trKey = `${translator.engine}:${translator.status}`;
-        if (trKey !== lastTranslatorStatus) {
-          // Languages become known once the translator is ready.
-          if (lastTranslatorStatus !== null && translator.status === "ready" && !formDirty) loadState();
-          lastTranslatorStatus = trKey;
+        renderVmix(msg.vmix);
+        const key = `${translator.engine}:${translator.status}`;
+        if (key !== lastTranslatorKey) {
+          // Language names become known once the translator is ready.
+          if (lastTranslatorKey !== null && translator.status === "ready") loadState();
+          lastTranslatorKey = key;
         }
       } else if (msg.type === "status") {
         status = msg;
         renderStatus();
       } else if (msg.type === "segment") {
-        addTranscript(msg.text);
+        addTranscript(msg.text, msg.lang);
       } else if (msg.type === "partial") {
         $("partial").textContent = msg.text;
       }
@@ -542,11 +274,12 @@
     ws.onclose = () => setTimeout(connect, 2000);
   }
 
-  applyTexts();
-  Promise.all([loadState(), loadDevices()]).then(() => {
-    renderDevices();
-    formDirty = false;
-    if (state.settings.vmix.enabled) refreshVmix();
-  });
+  // Settings may change in the other page (or tab): pick them up when we come back.
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadState(); });
+
+  window.LT.onLanguageChange(() => { renderStatus(); renderVmix(); renderListeners(); });
+  window.LT.applyTexts();
+  renderListeners();
+  loadState();
   connect();
 })();

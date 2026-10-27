@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Translate – Settings</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/admin/admin.css">
+</head>
+<body class="settings-page">
+  <header class="top">
+    <a class="icon-btn" href="/admin" data-pin-link><span aria-hidden="true">←</span> <span data-t="back"></span></a>
+    <h1 data-t="settings"></h1>
+    <div class="top-actions">
+      <select id="uiLang" aria-label="Language">
+        <option value="nl">NL</option>
+        <option value="en">EN</option>
+        <option value="ru">RU</option>
+        <option value="uk">UK</option>
+      </select>
+    </div>
+  </header>
+
+  <main class="settings-main">
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="audio" data-t="tabAudio"></button>
+      <button type="button" role="tab" data-tab="languages" data-t="tabLanguages"></button>
+      <button type="button" role="tab" data-tab="quick" data-t="tabQuick"></button>
+      <button type="button" role="tab" data-tab="vmix" data-t="tabVmix"></button>
+      <button type="button" role="tab" data-tab="network" data-t="tabNetwork"></button>
+    </nav>
+
+    <form id="settingsForm" class="card tab-panels" autocomplete="off">
+      <!-- Audio -->
+      <section class="tab-panel" data-panel="audio" role="tabpanel">
+        <h2 data-t="audioSource"></h2>
+        <div class="seg-control" role="radiogroup">
+          <label><input type="radio" name="kind" value="device"><span data-t="kindDevice"></span></label>
+          <label><input type="radio" name="kind" value="loopback"><span data-t="kindLoopback"></span></label>
+          <label><input type="radio" name="kind" value="file"><span data-t="kindFile"></span></label>
+        </div>
+        <div class="row" id="deviceRow">
+          <label for="device" data-t="device"></label>
+          <div class="inline">
+            <select id="device"></select>
+            <button id="refreshDevices" type="button" aria-label="Refresh">↻</button>
+          </div>
+        </div>
+        <div class="row" id="channelRow">
+          <label for="channel" data-t="channel"></label>
+          <select id="channel"></select>
+        </div>
+        <div class="row" id="fileRow">
+          <label for="filePath" data-t="file"></label>
+          <div class="inline">
+            <input id="filePath" type="text">
+            <label class="button-like"><input id="fileUpload" type="file" accept="audio/*" hidden><span data-t="choose"></span></label>
+          </div>
+        </div>
+        <div class="row">
+          <label for="gain"><span data-t="gain"></span> <span id="gainText" class="mono"></span></label>
+          <input id="gain" type="range" min="0.25" max="4" step="0.25">
+        </div>
+        <div class="meter-row">
+          <div class="meter"><div id="meterFill"></div></div>
+          <span id="levelText" class="mono small"></span>
+        </div>
+
+        <h2 data-t="recognition"></h2>
+        <div class="row pair">
+          <div>
+            <label for="model" data-t="model"></label>
+            <select id="model"></select>
+          </div>
+          <div>
+            <label for="asrDevice" data-t="processor"></label>
+            <select id="asrDevice">
+              <option value="auto" data-t="auto"></option>
+              <option value="cuda">GPU (NVIDIA)</option>
+              <option value="cpu">CPU</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Languages -->
+      <section class="tab-panel" data-panel="languages" role="tabpanel">
+        <div class="row">
+          <label for="sourceLang" data-t="mainLanguage"></label>
+          <select id="sourceLang"></select>
+        </div>
+        <h2 data-t="listenerLanguages"></h2>
+        <div id="targets" class="targets"></div>
+        <label class="check"><input id="tts" type="checkbox"> <span data-t="tts"></span> 🔊</label>
+
+        <h2 data-t="engine"></h2>
+        <div class="row">
+          <select id="engine" aria-label="Translation engine">
+            <option value="libretranslate">LibreTranslate</option>
+            <option value="nllb">NLLB (Meta)</option>
+          </select>
+        </div>
+        <div id="nllbRows" class="row pair">
+          <div>
+            <label for="nllbModel" data-t="nllbModel"></label>
+            <select id="nllbModel">
+              <option value="600M" data-t="nllbSmall"></option>
+              <option value="1.3B" data-t="nllbLarge"></option>
+            </select>
+          </div>
+          <div>
+            <label for="nllbDevice" data-t="processor"></label>
+            <select id="nllbDevice">
+              <option value="cpu">CPU</option>
+              <option value="cuda">GPU (NVIDIA)</option>
+              <option value="auto" data-t="auto"></option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick languages -->
+      <section class="tab-panel" data-panel="quick" role="tabpanel">
+        <h2 data-t="quickLanguages"></h2>
+        <div id="quick" class="targets"></div>
+      </section>
+
+      <!-- vMix -->
+      <section class="tab-panel" data-panel="vmix" role="tabpanel">
+        <label class="check"><input id="vmixEnabled" type="checkbox"> <span data-t="sendToVmix"></span></label>
+        <div class="row">
+          <label for="vmixUrl" data-t="vmixUrl"></label>
+          <div class="inline">
+            <input id="vmixUrl" type="text" placeholder="http://127.0.0.1:8088">
+            <button id="vmixRefresh" type="button" aria-label="Refresh">↻</button>
+          </div>
+        </div>
+        <div class="row pair">
+          <div>
+            <label for="vmixInput" data-t="vmixInput"></label>
+            <select id="vmixInput"></select>
+          </div>
+          <div>
+            <label for="vmixField" data-t="vmixField"></label>
+            <select id="vmixField"></select>
+          </div>
+        </div>
+        <div class="row pair">
+          <div>
+            <label for="vmixOverlay" data-t="vmixOverlay"></label>
+            <select id="vmixOverlay">
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+            </select>
+          </div>
+          <div>
+            <label for="vmixMaxChars" data-t="vmixMaxChars"></label>
+            <input id="vmixMaxChars" type="number" min="20" max="1000" step="10">
+          </div>
+        </div>
+        <label class="check"><input id="vmixAuto" type="checkbox"> <span data-t="vmixAuto"></span></label>
+        <div class="inline-buttons">
+          <button id="vmixTest" type="button" data-t="vmixTest"></button>
+          <span id="vmixStatus" class="small"></span>
+        </div>
+        <p class="muted small" data-t="vmixRequires"></p>
+      </section>
+
+      <!-- Network -->
+      <section class="tab-panel" data-panel="network" role="tabpanel">
+        <div class="row">
+          <label for="address" data-t="address"></label>
+          <select id="address"></select>
+        </div>
+        <div class="row">
+          <label for="wifi" data-t="wifi"></label>
+          <input id="wifi" type="text">
+        </div>
+        <div class="row pair">
+          <div>
+            <label for="pin" data-t="pin"></label>
+            <input id="pin" type="text" inputmode="numeric">
+          </div>
+          <div>
+            <label for="port" data-t="port"></label>
+            <input id="port" type="text" readonly>
+          </div>
+        </div>
+      </section>
+
+      <div class="save-bar">
+        <span id="saved" class="muted" hidden></span>
+        <span id="saveError" class="error" hidden></span>
+        <button class="primary" type="submit" data-t="save"></button>
+      </div>
+    </form>
+  </main>
+
+  <script src="/static/admin/i18n.js"></script>
+  <script src="/static/admin/common.js"></script>
+  <script src="/static/admin/settings.js"></script>
+</body>
+</html>

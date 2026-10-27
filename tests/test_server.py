@@ -152,6 +152,7 @@ def test_testimony_in_russian_goes_to_phones_and_vmix(client):
 
     state = client.get("/api/admin/state").json()
     assert [l["code"] for l in state["speaker_languages"]] == ["nl", "ru", "uk"]
+    assert {l["code"] for l in state["quick_language_options"]} >= {"ru", "uk", "en"}
     assert client.get("/api/admin/vmix/inputs").json()["inputs"][0]["key"] == "bbb-222"
 
     pipeline = client.services.pipeline
@@ -186,3 +187,12 @@ def test_testimony_in_russian_goes_to_phones_and_vmix(client):
         assert len(fake.calls) == calls
 
     assert client.post("/api/admin/speaker", json={"lang": "xx"}).status_code == 400
+
+
+def test_quick_languages_setting_drives_speaker_buttons(client):
+    settings = client.get("/api/admin/state").json()["settings"]
+    settings["quick_languages"] = ["uk", "en"]
+    state = client.post("/api/admin/settings", json=settings).json()
+    assert [l["code"] for l in state["speaker_languages"]] == ["nl", "uk", "en"]
+    assert client.post("/api/admin/speaker", json={"lang": "ru"}).status_code == 400
+    assert client.get("/admin/settings").status_code == 200

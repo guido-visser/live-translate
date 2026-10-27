@@ -96,9 +96,9 @@ class Pipeline:
         }
 
     def speaker_languages(self) -> list[str]:
-        """The main language plus the listener languages Whisper can recognize."""
+        """The main language plus the configured quick languages Whisper can recognize."""
         main = self.source_language
-        others = [l for l in self.settings.target_languages if l != main and l in WHISPER_LANGUAGES]
+        others = [l for l in self.settings.quick_languages if l != main and l in WHISPER_LANGUAGES]
         return [main, *others]
 
     # -- lifecycle -------------------------------------------------------------

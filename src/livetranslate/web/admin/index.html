@@ -12,93 +12,37 @@
     <h1>Live Translate</h1>
     <div class="pills">
       <span id="statePill" class="pill"></span>
-      <span id="speakerPill" class="pill testimony" hidden></span>
       <span id="trPill" class="pill"></span>
     </div>
-    <select id="uiLang" aria-label="Language">
-      <option value="nl">Nederlands</option>
-      <option value="en">English</option>
-      <option value="ru">Русский</option>
-      <option value="uk">Українська</option>
-    </select>
+    <div class="top-actions">
+      <button id="qrBtn" class="icon-btn" type="button"><span aria-hidden="true">▦</span> <span data-t="qr"></span></button>
+      <a class="icon-btn" href="/admin/settings" data-pin-link><span aria-hidden="true">⚙</span> <span data-t="settings"></span></a>
+      <select id="uiLang" aria-label="Language">
+        <option value="nl">NL</option>
+        <option value="en">EN</option>
+        <option value="ru">RU</option>
+        <option value="uk">UK</option>
+      </select>
+    </div>
   </header>
 
-  <main class="grid">
+  <main class="grid main-grid">
     <section class="card controls">
       <div class="buttons">
         <button id="startBtn" class="big primary" type="button"></button>
         <button id="pauseBtn" class="big" type="button" disabled></button>
       </div>
       <div class="speaker-row">
-        <span class="speaker-label" data-t="speaker"></span>
+        <span class="speaker-label" data-t="spokenLanguage"></span>
         <div id="speakerButtons" class="speaker-buttons" role="radiogroup"></div>
-        <span class="muted small" data-t="speakerHint"></span>
       </div>
-      <p id="error" class="error" hidden></p>
-      <p id="trDetail" class="muted small" hidden></p>
       <div class="meter-row">
         <span data-t="level"></span>
         <div class="meter"><div id="meterFill"></div></div>
         <span id="levelText" class="mono small"></span>
       </div>
-    </section>
-
-    <section class="card qr-card">
-      <h2 data-t="share"></h2>
-      <img id="qrImg" alt="QR code" width="220" height="220">
-      <p><a id="url" class="mono" target="_blank" rel="noopener"></a></p>
-      <p id="wifiLine" class="muted"></p>
-      <button id="qrFull" type="button" data-t="fullscreenQr"></button>
-    </section>
-
-    <section class="card">
-      <h2 data-t="listeners"></h2>
-      <table class="listeners"><tbody id="listenerRows"></tbody></table>
-    </section>
-
-    <section class="card vmix-card">
-      <h2>vMix</h2>
-      <label class="check"><input id="vmixEnabled" type="checkbox"> <span data-t="vmixEnabled"></span></label>
-      <div class="row">
-        <label for="vmixUrl" data-t="vmixUrl"></label>
-        <div class="inline">
-          <input id="vmixUrl" type="text" placeholder="http://127.0.0.1:8088">
-          <button id="vmixRefresh" type="button" title="Refresh">↻</button>
-        </div>
-      </div>
-      <div class="row">
-        <label for="vmixInput" data-t="vmixInput"></label>
-        <select id="vmixInput"></select>
-      </div>
-      <div class="row">
-        <label for="vmixField" data-t="vmixField"></label>
-        <select id="vmixField"></select>
-      </div>
-      <div class="row pair">
-        <div>
-          <label for="vmixOverlay" data-t="vmixOverlay"></label>
-          <select id="vmixOverlay">
-            <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
-          </select>
-        </div>
-        <div>
-          <label for="vmixMaxChars" data-t="vmixMaxChars"></label>
-          <input id="vmixMaxChars" type="number" min="20" max="1000" step="10">
-        </div>
-      </div>
-      <label class="check"><input id="vmixAuto" type="checkbox"> <span data-t="vmixAuto"></span></label>
-      <div class="buttons vmix-buttons">
-        <button id="overlayOn" type="button" data-t="overlayOn"></button>
-        <button id="overlayOff" type="button" data-t="overlayOff"></button>
-        <button id="vmixTest" type="button" data-t="vmixTest"></button>
-      </div>
-      <p id="vmixStatus" class="small"></p>
-      <pre id="vmixLast" class="vmix-last" hidden></pre>
-      <div class="save-row">
-        <button id="vmixSave" class="primary" type="button" data-t="save"></button>
-        <span id="vmixSaved" class="muted" hidden></span>
-      </div>
-      <p class="muted small" data-t="vmixHint"></p>
+      <p id="error" class="error" hidden></p>
+      <p id="trDetail" class="muted small" hidden></p>
     </section>
 
     <section class="card transcript-card">
@@ -107,114 +51,23 @@
       <p id="partial" class="partial"></p>
     </section>
 
-    <section class="card settings">
-      <h2 data-t="settings"></h2>
-      <form id="settingsForm">
-        <fieldset>
-          <legend data-t="audio"></legend>
-          <div class="seg-control" role="radiogroup">
-            <label><input type="radio" name="kind" value="device"><span data-t="kindDevice"></span></label>
-            <label><input type="radio" name="kind" value="loopback"><span data-t="kindLoopback"></span></label>
-            <label><input type="radio" name="kind" value="file"><span data-t="kindFile"></span></label>
-          </div>
-          <div class="row" id="deviceRow">
-            <label for="device" data-t="device"></label>
-            <div class="inline">
-              <select id="device"></select>
-              <button id="refreshDevices" type="button" title="Refresh">↻</button>
-            </div>
-          </div>
-          <div class="row" id="channelRow">
-            <label for="channel" data-t="channel"></label>
-            <select id="channel"></select>
-          </div>
-          <div class="row" id="fileRow">
-            <label for="filePath" data-t="file"></label>
-            <div class="inline">
-              <input id="filePath" type="text" placeholder="C:\…\preek.wav">
-              <label class="button-like"><input id="fileUpload" type="file" accept="audio/*" hidden><span data-t="choose"></span></label>
-            </div>
-          </div>
-          <div class="row">
-            <label for="gain"><span data-t="gain"></span> <span id="gainText" class="mono"></span></label>
-            <input id="gain" type="range" min="0.25" max="4" step="0.25">
-          </div>
-        </fieldset>
+    <section class="card">
+      <h2 data-t="listeners"></h2>
+      <table class="listeners"><tbody id="listenerRows"></tbody></table>
+    </section>
 
-        <fieldset>
-          <legend data-t="recognition"></legend>
-          <div class="row">
-            <label for="sourceLang" data-t="sourceLang"></label>
-            <select id="sourceLang"></select>
-          </div>
-          <div class="row">
-            <label for="model" data-t="model"></label>
-            <select id="model"></select>
-          </div>
-          <div class="row">
-            <label for="asrDevice" data-t="processor"></label>
-            <select id="asrDevice">
-              <option value="auto" data-t="auto"></option>
-              <option value="cuda">GPU (NVIDIA)</option>
-              <option value="cpu">CPU</option>
-            </select>
-          </div>
-          <p class="muted small" data-t="modelHint"></p>
-        </fieldset>
-
-        <fieldset>
-          <legend data-t="translation"></legend>
-          <div class="row">
-            <label for="engine" data-t="engine"></label>
-            <select id="engine">
-              <option value="libretranslate">LibreTranslate</option>
-              <option value="nllb">NLLB (Meta)</option>
-            </select>
-          </div>
-          <div id="nllbRows">
-            <div class="row">
-              <label for="nllbModel" data-t="nllbModel"></label>
-              <select id="nllbModel">
-                <option value="600M" data-t="nllbSmall"></option>
-                <option value="1.3B" data-t="nllbLarge"></option>
-              </select>
-            </div>
-            <div class="row">
-              <label for="nllbDevice" data-t="processor"></label>
-              <select id="nllbDevice">
-                <option value="cpu" data-t="cpuRecommended"></option>
-                <option value="cuda">GPU (NVIDIA)</option>
-                <option value="auto" data-t="auto"></option>
-              </select>
-            </div>
-          </div>
-          <p class="muted small" data-t="engineHint"></p>
-          <p class="muted small" data-t="targetsHint"></p>
-          <div id="targets" class="targets"></div>
-          <label class="check"><input id="tts" type="checkbox"> <span data-t="tts"></span></label>
-        </fieldset>
-
-        <fieldset>
-          <legend data-t="network"></legend>
-          <div class="row">
-            <label for="address" data-t="address"></label>
-            <select id="address"></select>
-          </div>
-          <div class="row">
-            <label for="wifi" data-t="wifi"></label>
-            <input id="wifi" type="text">
-          </div>
-          <div class="row">
-            <label for="pin" data-t="pin"></label>
-            <input id="pin" type="text" inputmode="numeric" autocomplete="off">
-          </div>
-        </fieldset>
-
-        <div class="save-row">
-          <button class="primary" type="submit" data-t="save"></button>
-          <span id="saved" class="muted" hidden></span>
-        </div>
-      </form>
+    <section class="card vmix-quick">
+      <h2>vMix</h2>
+      <label class="switch-row">
+        <span data-t="sendToVmix"></span>
+        <button id="vmixSend" class="switch" type="button" role="switch" aria-checked="false"></button>
+      </label>
+      <label class="switch-row">
+        <span data-t="overlay"></span>
+        <button id="vmixOverlay" class="switch" type="button" role="switch" aria-checked="false"></button>
+      </label>
+      <p id="vmixStatus" class="small muted"></p>
+      <pre id="vmixLast" class="vmix-last" hidden></pre>
     </section>
 
     <section class="card">
@@ -223,7 +76,19 @@
     </section>
   </main>
 
+  <dialog id="qrDialog" class="qr-dialog">
+    <h2 data-t="qrTitle"></h2>
+    <img id="qrImg" alt="QR code" width="320" height="320">
+    <p><a id="url" class="mono" target="_blank" rel="noopener"></a></p>
+    <p id="wifiLine" class="muted"></p>
+    <div class="dialog-buttons">
+      <button id="qrFull" type="button" data-t="fullscreen"></button>
+      <button id="qrClose" class="primary" type="button" data-t="close"></button>
+    </div>
+  </dialog>
+
   <script src="/static/admin/i18n.js"></script>
+  <script src="/static/admin/common.js"></script>
   <script src="/static/admin/admin.js"></script>
 </body>
 </html>
