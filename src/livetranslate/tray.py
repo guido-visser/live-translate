@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import locale
 import logging
 import threading
 import webbrowser
 from collections.abc import Callable
 
 from PIL import Image, ImageDraw
+
+from .languages import ui_language
 
 log = logging.getLogger(__name__)
 
@@ -68,18 +69,6 @@ TEXTS = {
 }
 
 
-def system_language() -> str:
-    """nl/ru/uk/en from the OS locale ("Dutch_Netherlands", "nl_NL", "Ukrainian_Ukraine", …)."""
-    try:
-        name = (locale.getlocale()[0] or "").lower()
-    except ValueError:
-        name = ""
-    for code, prefixes in (("nl", ("nl", "dutch")), ("ru", ("ru", "russian")), ("uk", ("uk", "ukrainian"))):
-        if name.startswith(prefixes):
-            return code
-    return "en"
-
-
 def make_icon(state: str, size: int = 64) -> Image.Image:
     """A coloured circle with a white speech bubble; the colour shows the state."""
     scale = 4  # draw large and shrink for smooth edges
@@ -127,7 +116,7 @@ class Tray:
         self.admin_url = admin_url
         self.qr_url = qr_url
         self.on_exit = on_exit
-        self.texts = TEXTS[language or system_language()]
+        self.texts = TEXTS[language or ui_language()]
         self._state = ("", -1)
         self._stop = threading.Event()
         self.icon = None

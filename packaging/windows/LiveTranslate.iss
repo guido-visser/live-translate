@@ -54,12 +54,28 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Live Translate"" dir=in action=allow protocol=TCP localport=8000 profile=any"; Flags: runhidden
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Description: "{cm:LaunchProgram,Live Translate}"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
+[UninstallDelete]
+Type: files; Name: "{app}\VERSION"
+Type: files; Name: "{app}\LANGUAGE"
+
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Live Translate"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"
 
 [Code]
+// The app's interface starts in the language chosen for Setup (codes as in languages.py).
+function UiLanguage: String;
+begin
+  Result := 'en';
+  if ActiveLanguage = 'dutch' then Result := 'nl'
+  else if ActiveLanguage = 'russian' then Result := 'ru'
+  else if ActiveLanguage = 'ukrainian' then Result := 'uk';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
     SaveStringToFile(ExpandConstant('{app}\VERSION'), '{#AppVersion}', False);
+    SaveStringToFile(ExpandConstant('{app}\LANGUAGE'), UiLanguage, False);
+  end;
 end;

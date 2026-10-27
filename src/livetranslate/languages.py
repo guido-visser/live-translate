@@ -1,4 +1,7 @@
-"""Language names as speakers of that language write them."""
+"""Language names as speakers of that language write them, and the interface language."""
+
+import locale
+import os
 
 NATIVE_NAMES = {
     "ar": "العربية",
@@ -47,3 +50,22 @@ RTL = {"ar", "fa", "he", "ur"}
 
 def native_name(code: str, fallback: str | None = None) -> str:
     return NATIVE_NAMES.get(code, fallback or code)
+
+
+UI_LANGUAGES = ("nl", "en", "ru", "uk")
+
+
+def ui_language() -> str:
+    """Interface language for the tray and the operator pages: the installer's language
+    (passed on by the launcher), else the OS locale ("Dutch_Netherlands", "nl_NL", …)."""
+    chosen = os.environ.get("LIVETRANSLATE_UI_LANG", "").strip().lower()
+    if chosen in UI_LANGUAGES:
+        return chosen
+    try:
+        name = (locale.getlocale()[0] or "").lower()
+    except ValueError:
+        name = ""
+    for code, prefixes in (("nl", ("nl", "dutch")), ("ru", ("ru", "russian")), ("uk", ("uk", "ukrainian"))):
+        if name.startswith(prefixes):
+            return code
+    return "en"

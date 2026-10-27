@@ -246,3 +246,10 @@ def test_gain_applies_live_without_restart(client):
     client.post("/api/admin/settings", json=settings)
     assert restarts == [True]
     pipeline._source = None
+
+
+def test_admin_pages_start_in_installer_language(client, monkeypatch):
+    monkeypatch.setenv("LIVETRANSLATE_UI_LANG", "ru")
+    r = client.get("/admin/defaults.js")
+    assert r.status_code == 200
+    assert r.text.strip() == 'window.LT_UI_LANG = "ru";'

@@ -26,6 +26,8 @@ set "LIVETRANSLATE_UV=%UV%"
 
 set "VER=dev"
 if exist "%APP%VERSION" set /p VER=<"%APP%VERSION"
+rem Language picked in the installer; the app starts its interface in it.
+if exist "%APP%LANGUAGE" set /p LIVETRANSLATE_UI_LANG=<"%APP%LANGUAGE"
 set "MARKER=%UV_PROJECT_ENVIRONMENT%\.installed-%VER%"
 
 if not exist "%MARKER%" (

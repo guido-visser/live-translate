@@ -6,8 +6,9 @@ window.LT = (() => {
   const pin = new URLSearchParams(location.search).get("pin");
   const withPin = (url) => (pin ? `${url}${url.includes("?") ? "&" : "?"}pin=${encodeURIComponent(pin)}` : url);
 
-  let lang = "nl";
-  try { lang = localStorage.getItem("lt.admin.lang") || "nl"; } catch { /* private mode */ }
+  // The operator's own pick wins; otherwise the installer's (or Windows') language.
+  let lang = window.LT_UI_LANG || "en";
+  try { lang = localStorage.getItem("lt.admin.lang") || lang; } catch { /* private mode */ }
   const listeners = [];
 
   const t = (key) => (window.ADMIN_I18N[lang] || window.ADMIN_I18N.en)[key] || window.ADMIN_I18N.en[key] || key;

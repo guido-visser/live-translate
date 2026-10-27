@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import re
 from pathlib import Path
@@ -15,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from ..audio.devices import list_all
 from ..config import Settings, SettingsStore, data_dir as default_data_dir
 from ..integrations.vmix import VmixOutput
-from ..languages import RTL, native_name
+from ..languages import RTL, native_name, ui_language
 from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
@@ -122,6 +123,15 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         except HTTPException as exc:
             return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
         return FileResponse(WEB / "admin" / "settings.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/admin/defaults.js", include_in_schema=False)
+    async def admin_defaults():
+        # Loaded before common.js: the language the pages start in until the operator picks one.
+        return Response(
+            f"window.LT_UI_LANG = {json.dumps(ui_language())};\n",
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/qr", include_in_schema=False)
     async def qr_page():
