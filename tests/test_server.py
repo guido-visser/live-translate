@@ -65,7 +65,7 @@ def test_listener_gets_languages_and_translated_segments(client):
         assert receive_until(ws, "history")["segments"] == []
 
         pipeline = client.services.pipeline
-        client.portal.call(pipeline._sentences.put_nowait, ("Goedemorgen allemaal.", time.time()))
+        client.portal.call(pipeline._sentences.put_nowait, ("Goedemorgen allemaal.", time.time(), "nl"))
         seg = receive_until(ws, "segment")
         assert seg["text"] == "[uk] Goedemorgen allemaal."
         assert seg["lang"] == "uk"
@@ -105,7 +105,7 @@ def test_switching_to_nllb_retranslates_history(client):
         ws.receive_json()
         ws.send_json({"type": "lang", "lang": "uk"})
         receive_until(ws, "history")
-        client.portal.call(pipeline._sentences.put_nowait, ("Laten we bidden.", time.time()))
+        client.portal.call(pipeline._sentences.put_nowait, ("Laten we bidden.", time.time(), "nl"))
         assert receive_until(ws, "segment")["text"] == "[uk] Laten we bidden."
 
         settings = client.get("/api/admin/state").json()["settings"]
@@ -116,7 +116,7 @@ def test_switching_to_nllb_retranslates_history(client):
 
         state = client.get("/api/admin/state").json()
         assert state["translator"] == {"engine": "nllb", "status": "ready", "detail": "", "needs_restart": False}
-        client.portal.call(pipeline._sentences.put_nowait, ("Amen.", time.time()))
+        client.portal.call(pipeline._sentences.put_nowait, ("Amen.", time.time(), "nl"))
         assert receive_until(ws, "segment")["text"] == "[nllb uk] Amen."
 
     with client.websocket_connect("/ws/listen") as ws:
@@ -139,3 +139,50 @@ def test_qr_code_and_pages(client):
     assert client.get("/").status_code == 200
     assert client.get("/admin").status_code == 200
     assert client.get("/audio/ru.mp3").status_code == 404  # TTS disabled in this fixture
+
+
+def test_testimony_in_russian_goes_to_phones_and_vmix(client):
+    from tests.test_vmix import FakeVmix
+
+    fake = FakeVmix()
+    client.services.vmix._transport = fake.transport
+    settings = client.get("/api/admin/state").json()["settings"]
+    settings["vmix"].update(enabled=True, input="bbb-222", field="Headline.Text", overlay=1)
+    client.post("/api/admin/settings", json=settings)
+
+    state = client.get("/api/admin/state").json()
+    assert [l["code"] for l in state["speaker_languages"]] == ["nl", "ru", "uk"]
+    assert client.get("/api/admin/vmix/inputs").json()["inputs"][0]["key"] == "bbb-222"
+
+    pipeline = client.services.pipeline
+    sockets = {}
+    with client.websocket_connect("/ws/listen") as ru, client.websocket_connect("/ws/listen") as uk, \
+            client.websocket_connect("/ws/listen") as nl:
+        for lang, ws in (("ru", ru), ("uk", uk), ("nl", nl)):
+            ws.receive_json()
+            ws.send_json({"type": "lang", "lang": lang})
+            receive_until(ws, "history")
+            sockets[lang] = ws
+
+        assert client.post("/api/admin/speaker", json={"lang": "ru"}).json()["speaker_language"] == "ru"
+        assert fake.calls[:2] == [
+            {"Function": "SetText", "Input": "bbb-222", "SelectedName": "Headline.Text", "Value": ""},
+            {"Function": "OverlayInput1In", "Input": "bbb-222"},
+        ]
+
+        client.portal.call(pipeline._sentences.put_nowait, ("Я из Харькова.", time.time(), "ru"))
+        assert receive_until(ru, "segment")["text"] == "Я из Харькова."
+        assert receive_until(uk, "segment")["text"] == "[uk] Я из Харькова."
+        assert receive_until(nl, "segment")["text"] == "[nl] Я из Харькова."
+        assert fake.calls[2]["Value"] == "[nl] Я из Харькова."
+
+        client.post("/api/admin/speaker", json={"lang": "nl"})
+        assert fake.calls[-1] == {"Function": "OverlayInput1Out"}
+
+        # Dutch speech is not sent to vMix.
+        calls = len(fake.calls)
+        client.portal.call(pipeline._sentences.put_nowait, ("Dank je wel.", time.time(), "nl"))
+        assert receive_until(nl, "segment")["text"] == "Dank je wel."
+        assert len(fake.calls) == calls
+
+    assert client.post("/api/admin/speaker", json={"lang": "xx"}).status_code == 400

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..audio.devices import list_all
 from ..config import Settings, SettingsStore, data_dir as default_data_dir
+from ..integrations.vmix import VmixOutput
 from ..languages import RTL, native_name
 from ..pipeline import Pipeline
 from ..translate.service import TranslationService
@@ -36,7 +37,8 @@ class Services:
         self.translator = TranslationService(store.settings, data)
         self.speech = SpeechService(data / "models" / "piper")
         self.speech.enabled = store.settings.tts_enabled
-        self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data)
+        self.vmix = VmixOutput(lambda: store.settings)
+        self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data, self.vmix)
         self.gpu = GpuStats()
 
     @property
@@ -82,6 +84,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             task.cancel()
         await services.pipeline.stop()
         await services.translator.close()
+        await services.vmix.close()
 
     app = FastAPI(title="Live Translate", lifespan=lifespan)
     app.state.services = services
@@ -197,6 +200,10 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         return {
             "settings": s.model_dump(),
             "status": services.pipeline.status(),
+            "speaker_languages": [
+                {"code": c, "name": native_name(c, tr.name_of(c))} for c in services.pipeline.speaker_languages()
+            ],
+            "vmix": services.vmix.status,
             "translator": translator_status(tr),
             "source_languages": sources,
             "target_languages": sorted(targets, key=lambda l: l["name"].lower()),
@@ -204,7 +211,9 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             "models": WHISPER_MODELS,
             "addresses": lan_addresses(),
             "url": listener_url(s.public_host, s.port),
-            "history": [{"id": seg.id, "text": seg.source} for seg in list(services.pipeline.history)[-30:]],
+            "history": [
+                {"id": seg.id, "text": seg.source, "lang": seg.lang} for seg in list(services.pipeline.history)[-30:]
+            ],
         }
 
     @app.get("/api/admin/state")
@@ -234,6 +243,9 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             services.hub.to_listeners(services.languages_message())
 
         asyncio.create_task(apply_translation())
+        if new.source_language != old.source_language or new.vmix.url != old.vmix.url:
+            services.pipeline.speaker_language = new.source_language
+            services.vmix.previous = None
         if (new.audio, new.asr, new.source_language) != (old.audio, old.asr, old.source_language):
             asyncio.create_task(services.pipeline.restart())
         services.hub.to_listeners(services.languages_message())
@@ -257,6 +269,41 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         body = await request.json()
         services.pipeline.set_paused(bool(body.get("paused")))
         return {"paused": services.pipeline.paused}
+
+    @app.post("/api/admin/speaker")
+    async def set_speaker(request: Request):
+        """Switch the language being spoken at the microphone (e.g. Russian for a testimony)."""
+        require_admin(request)
+        lang = (await request.json()).get("lang")
+        try:
+            await services.pipeline.set_speaker_language(lang)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"speaker_language": services.pipeline.speaker_language, "vmix": services.vmix.status}
+
+    @app.get("/api/admin/vmix/inputs")
+    async def vmix_inputs(request: Request):
+        require_admin(request)
+        state = await services.vmix.inputs()
+        if state is None:
+            raise HTTPException(502, services.vmix.status["error"] or "vMix not reachable")
+        return state
+
+    @app.post("/api/admin/vmix/overlay")
+    async def vmix_overlay(request: Request):
+        require_admin(request)
+        on = bool((await request.json()).get("on"))
+        if not await services.vmix.overlay(on):
+            raise HTTPException(502, services.vmix.status["error"] or "Choose a vMix input first")
+        return services.vmix.status
+
+    @app.post("/api/admin/vmix/test")
+    async def vmix_test(request: Request):
+        require_admin(request)
+        text = (await request.json()).get("text") or "Live Translate ✓"
+        if not await services.vmix.show(text):
+            raise HTTPException(502, services.vmix.status["error"] or "Choose a vMix input and field first")
+        return services.vmix.status
 
     @app.post("/api/admin/translator/restart")
     async def restart_translator(request: Request):
@@ -331,5 +378,6 @@ async def _admin_ticker(services: Services) -> None:
                 "stats": services.pipeline.stats,
                 "gpu": gpu,
                 "translator": translator_status(tr),
+                "vmix": services.vmix.status,
             }
         )

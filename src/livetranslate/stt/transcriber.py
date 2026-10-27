@@ -148,6 +148,13 @@ class StreamingTranscriber:
     def ready(self) -> bool:
         return self._new_samples >= self.settings.min_chunk_s * SAMPLE_RATE
 
+    def finalize(self) -> None:
+        """Release everything recognized so far as sentences (used before switching language)."""
+        self.pending += self.hyp.commit_all()
+        self._emit_sentences()
+        if self.pending:
+            self._emit(len(self.pending))
+
     def reset(self) -> None:
         """Discard everything (used when pausing)."""
         self._trim_to(self.end_time)

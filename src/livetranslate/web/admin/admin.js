@@ -68,7 +68,158 @@
     $("pauseBtn").classList.toggle("warn", status.paused);
     $("error").textContent = status.error || "";
     $("error").hidden = !status.error;
+    renderSpeakers();
   }
+
+  // -- speaker language (testimonies) -------------------------------------------------
+
+  function mainLanguage() {
+    return state?.settings.source_language;
+  }
+
+  function renderSpeakers() {
+    const box = $("speakerButtons");
+    const langs = state?.speaker_languages || [];
+    const current = status.speaker_language || mainLanguage();
+    if (box.dataset.langs !== langs.map((l) => l.code).join()) {
+      box.dataset.langs = langs.map((l) => l.code).join();
+      box.textContent = "";
+      langs.forEach((lang, i) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.lang = lang.code;
+        b.setAttribute("role", "radio");
+        b.innerHTML = `<span></span><span class="key">${i + 1}</span>`;
+        b.firstChild.textContent = lang.name;
+        b.addEventListener("click", () => setSpeaker(lang.code));
+        box.appendChild(b);
+      });
+    }
+    box.querySelectorAll("button").forEach((b) => {
+      const active = b.dataset.lang === current;
+      b.classList.toggle("active", active);
+      b.classList.toggle("foreign", b.dataset.lang !== mainLanguage());
+      b.setAttribute("aria-checked", String(active));
+    });
+    const pill = $("speakerPill");
+    const foreign = current && current !== mainLanguage();
+    pill.hidden = !foreign;
+    if (foreign) pill.textContent = `${t("testimony")}: ${langs.find((l) => l.code === current)?.name || current}`;
+  }
+
+  async function setSpeaker(lang) {
+    if (lang === status.speaker_language) return;
+    status.speaker_language = lang;
+    renderSpeakers();
+    try {
+      const res = await api("/api/admin/speaker", { method: "POST", body: JSON.stringify({ lang }) });
+      renderVmixStatus(res.vmix);
+    } catch (err) {
+      $("error").textContent = err.message;
+      $("error").hidden = false;
+    }
+  }
+
+  // Number keys 1–9 pick the speaker language.
+  document.addEventListener("keydown", (e) => {
+    if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName) || e.ctrlKey || e.altKey || e.metaKey) return;
+    const index = Number(e.key) - 1;
+    const lang = state?.speaker_languages?.[index];
+    if (Number.isInteger(index) && lang) setSpeaker(lang.code);
+  });
+
+  // -- vMix ---------------------------------------------------------------------------
+
+  let vmixState = null; // inputs as reported by vMix
+
+  function fillVmix() {
+    const v = state.settings.vmix;
+    $("vmixEnabled").checked = v.enabled;
+    $("vmixUrl").value = v.url;
+    $("vmixOverlay").value = String(v.overlay);
+    $("vmixMaxChars").value = v.max_chars;
+    $("vmixAuto").checked = v.auto_overlay;
+    renderVmixInputs();
+    renderVmixStatus(state.vmix);
+  }
+
+  function renderVmixInputs() {
+    const v = state.settings.vmix;
+    const select = $("vmixInput");
+    const wanted = select.value || v.input;
+    select.textContent = "";
+    select.appendChild(new Option("—", ""));
+    for (const input of vmixState?.inputs || []) {
+      select.appendChild(new Option(`${input.number}. ${input.title}`, input.key));
+    }
+    if (wanted && ![...select.options].some((o) => o.value === wanted)) {
+      select.appendChild(new Option(`${t("vmixSavedInput")} (${wanted.slice(0, 8)}…)`, wanted));
+    }
+    select.value = wanted || "";
+    renderVmixFields();
+  }
+
+  function renderVmixFields() {
+    const v = state.settings.vmix;
+    const select = $("vmixField");
+    const wanted = select.value || v.field;
+    const input = (vmixState?.inputs || []).find((i) => i.key === $("vmixInput").value);
+    const fields = input ? input.fields : wanted ? [wanted] : [];
+    select.textContent = "";
+    for (const f of fields) select.appendChild(new Option(f, f));
+    if (fields.includes(wanted)) select.value = wanted;
+  }
+
+  function renderVmixStatus(s) {
+    if (!s) return;
+    const el = $("vmixStatus");
+    if (s.ok === true) {
+      el.className = "small vmix-ok";
+      el.textContent = t("vmixOk") + (s.overlay === true ? ` · ${t("overlayShown")}` : s.overlay === false ? ` · ${t("overlayHidden")}` : "");
+    } else if (s.ok === false) {
+      el.className = "small vmix-error";
+      el.textContent = `${t("vmixError")}: ${s.error}`;
+    } else {
+      el.className = "small muted";
+      el.textContent = t("vmixUnknown");
+    }
+    $("vmixLast").textContent = s.last_text || "";
+    $("vmixLast").hidden = !s.last_text;
+  }
+
+  async function refreshVmix() {
+    // Ask the server to talk to the address typed in, even before it is saved.
+    if ($("vmixUrl").value.trim() !== state.settings.vmix.url) await saveSettings();
+    try {
+      vmixState = await api("/api/admin/vmix/inputs");
+      renderVmixStatus({ ...(state.vmix || {}), ok: true, error: "" });
+    } catch (err) {
+      vmixState = null;
+      renderVmixStatus({ ok: false, error: err.message.replace(/^\d+ /, "") });
+    }
+    renderVmixInputs();
+  }
+
+  async function vmixAction(path, body) {
+    if (formDirty) await saveSettings();
+    try {
+      renderVmixStatus(await api(path, { method: "POST", body: JSON.stringify(body) }));
+    } catch (err) {
+      renderVmixStatus({ ok: false, error: err.message.replace(/^\d+ /, "") });
+    }
+  }
+
+  $("vmixRefresh").addEventListener("click", refreshVmix);
+  $("vmixInput").addEventListener("change", () => { $("vmixField").value = ""; renderVmixFields(); });
+  $("overlayOn").addEventListener("click", () => vmixAction("/api/admin/vmix/overlay", { on: true }));
+  $("overlayOff").addEventListener("click", () => vmixAction("/api/admin/vmix/overlay", { on: false }));
+  $("vmixTest").addEventListener("click", () => vmixAction("/api/admin/vmix/test", { text: t("vmixTestText") }));
+  document.querySelector(".vmix-card").addEventListener("input", () => { formDirty = true; $("vmixSaved").hidden = true; });
+  $("vmixSave").addEventListener("click", async () => {
+    await saveSettings();
+    $("vmixSaved").textContent = t("saved");
+    $("vmixSaved").hidden = false;
+  });
 
   $("startBtn").addEventListener("click", async () => {
     if (status.state === "stopped") {
@@ -296,6 +447,7 @@
     $("wifi").value = s.wifi_name;
     $("pin").value = s.admin_pin;
     renderKind();
+    fillVmix();
     formDirty = false;
   }
 
@@ -317,6 +469,13 @@
     s.public_host = $("address").value === "__custom" ? "" : $("address").value;
     s.wifi_name = $("wifi").value.trim();
     s.admin_pin = $("pin").value.trim();
+    s.vmix.enabled = $("vmixEnabled").checked;
+    s.vmix.url = $("vmixUrl").value.trim() || "http://127.0.0.1:8088";
+    s.vmix.input = $("vmixInput").value;
+    s.vmix.field = $("vmixField").value;
+    s.vmix.overlay = Number($("vmixOverlay").value);
+    s.vmix.max_chars = Math.max(20, Math.min(1000, Number($("vmixMaxChars").value) || 160));
+    s.vmix.auto_overlay = $("vmixAuto").checked;
     return s;
   }
 
@@ -361,6 +520,7 @@
         renderLevel(msg.level_db);
         renderListeners(msg.listeners, msg.audio_listeners);
         renderStats(msg.stats, msg.gpu);
+        renderVmixStatus(msg.vmix);
         status = msg.status;
         translator = msg.translator;
         renderStatus();
@@ -383,6 +543,10 @@
   }
 
   applyTexts();
-  Promise.all([loadState(), loadDevices()]).then(() => { renderDevices(); formDirty = false; });
+  Promise.all([loadState(), loadDevices()]).then(() => {
+    renderDevices();
+    formDirty = false;
+    if (state.settings.vmix.enabled) refreshVmix();
+  });
   connect();
 })();

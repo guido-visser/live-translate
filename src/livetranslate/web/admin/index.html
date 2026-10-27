@@ -11,6 +11,7 @@
     <h1>Live Translate</h1>
     <div class="pills">
       <span id="statePill" class="pill"></span>
+      <span id="speakerPill" class="pill testimony" hidden></span>
       <span id="trPill" class="pill"></span>
     </div>
     <select id="uiLang" aria-label="Language">
@@ -26,6 +27,11 @@
       <div class="buttons">
         <button id="startBtn" class="big primary" type="button"></button>
         <button id="pauseBtn" class="big" type="button" disabled></button>
+      </div>
+      <div class="speaker-row">
+        <span class="speaker-label" data-t="speaker"></span>
+        <div id="speakerButtons" class="speaker-buttons" role="radiogroup"></div>
+        <span class="muted small" data-t="speakerHint"></span>
       </div>
       <p id="error" class="error" hidden></p>
       <p id="trDetail" class="muted small" hidden></p>
@@ -47,6 +53,51 @@
     <section class="card">
       <h2 data-t="listeners"></h2>
       <table class="listeners"><tbody id="listenerRows"></tbody></table>
+    </section>
+
+    <section class="card vmix-card">
+      <h2>vMix</h2>
+      <label class="check"><input id="vmixEnabled" type="checkbox"> <span data-t="vmixEnabled"></span></label>
+      <div class="row">
+        <label for="vmixUrl" data-t="vmixUrl"></label>
+        <div class="inline">
+          <input id="vmixUrl" type="text" placeholder="http://127.0.0.1:8088">
+          <button id="vmixRefresh" type="button" title="Refresh">↻</button>
+        </div>
+      </div>
+      <div class="row">
+        <label for="vmixInput" data-t="vmixInput"></label>
+        <select id="vmixInput"></select>
+      </div>
+      <div class="row">
+        <label for="vmixField" data-t="vmixField"></label>
+        <select id="vmixField"></select>
+      </div>
+      <div class="row pair">
+        <div>
+          <label for="vmixOverlay" data-t="vmixOverlay"></label>
+          <select id="vmixOverlay">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+          </select>
+        </div>
+        <div>
+          <label for="vmixMaxChars" data-t="vmixMaxChars"></label>
+          <input id="vmixMaxChars" type="number" min="20" max="1000" step="10">
+        </div>
+      </div>
+      <label class="check"><input id="vmixAuto" type="checkbox"> <span data-t="vmixAuto"></span></label>
+      <div class="buttons vmix-buttons">
+        <button id="overlayOn" type="button" data-t="overlayOn"></button>
+        <button id="overlayOff" type="button" data-t="overlayOff"></button>
+        <button id="vmixTest" type="button" data-t="vmixTest"></button>
+      </div>
+      <p id="vmixStatus" class="small"></p>
+      <pre id="vmixLast" class="vmix-last" hidden></pre>
+      <div class="save-row">
+        <button id="vmixSave" class="primary" type="button" data-t="save"></button>
+        <span id="vmixSaved" class="muted" hidden></span>
+      </div>
+      <p class="muted small" data-t="vmixHint"></p>
     </section>
 
     <section class="card transcript-card">

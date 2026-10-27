@@ -39,6 +39,22 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run 
 4. Press **Start translation**. Open **Full-screen QR code** on a projector/screen, or print it.
 5. During songs press **Pause (song)** (or the space bar) so music isn't "translated".
 
+### Testimonies in Russian or Ukrainian (with Dutch subtitles in vMix)
+
+When someone speaks another language at the microphone, switch the **speaker language** with the buttons under *Start* (or the number keys `1`, `2`, `3`…). Switching takes effect immediately, without reloading the model:
+
+* Phones get the original speech in that language, and translations in all other languages (including Dutch for Dutch listeners).
+* An orange **Testimony** label at the top shows a non-main language is active. Switch back to *Nederlands* (`1`) when the testimony ends.
+
+**Dutch subtitles in vMix** (on the same PC):
+
+1. In vMix, open **Settings → Web Controller** and enable it (port 8088).
+2. Add a **Title** input for the subtitles (e.g. a lower-third with one text field that can hold two lines).
+3. In Live Translate's **vMix** card: tick *Send Dutch subtitles*, press **↻**, then choose the title input, the text field and the overlay channel. Press **Save**.
+4. Use **Test text** and **Overlay on/off** to check it.
+
+During a testimony the Dutch translation appears as rolling subtitles (previous + current sentence, limited by *Max. characters*). With *Overlay automatically* ticked, switching to Russian/Ukrainian clears the title and brings the overlay in; switching back to Dutch takes it out. The overlay buttons always work manually too.
+
 ### If vMix/OBS starts dropping frames
 
 Speech recognition shares the GPU. In *Speech recognition* pick a smaller **model** (`medium` or `small`) or set **Run on** to *CPU*. Changes apply immediately. The *Performance* panel shows GPU load, memory and the delay.

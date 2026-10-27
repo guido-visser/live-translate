@@ -94,3 +94,19 @@ def test_reset_discards_open_text():
     t.process()
     t.reset()
     assert t.pending == [] and t.hyp.buffer == [] and out == []
+
+
+def test_finalize_emits_open_text():
+    out: list[str] = []
+    t = StreamingTranscriber(
+        lambda a, p: [Word(0.0, 0.4, " Dank"), Word(0.5, 0.9, " u")],
+        lambda a: True,
+        lambda p: None,
+        out.append,
+        AsrSettings(),
+    )
+    t.add_audio(np.full(SAMPLE_RATE, 0.1, dtype=np.float32))
+    t.process()  # first pass: nothing agreed yet
+    assert out == []
+    t.finalize()
+    assert out == ["Dank u"]

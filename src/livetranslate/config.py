@@ -58,6 +58,19 @@ class TranslationSettings(BaseModel):
     nllb_device: Literal["cpu", "cuda", "auto"] = "cpu"
 
 
+class VmixSettings(BaseModel):
+    """Dutch subtitles for testimonies, sent to a vMix Title input on the same PC."""
+
+    enabled: bool = False
+    url: str = "http://127.0.0.1:8088"
+    input: str = ""  # vMix input key
+    field: str = ""  # text field in that title, e.g. "Headline.Text"
+    overlay: int = Field(1, ge=1, le=4)
+    max_chars: int = Field(160, ge=20, le=1000)
+    # Switching the speaker to another language shows the overlay; back to the main language hides it.
+    auto_overlay: bool = True
+
+
 class Settings(BaseModel):
     source_language: str = "nl"
     target_languages: list[str] = Field(default_factory=lambda: ["ru", "uk", "en"])
@@ -72,6 +85,7 @@ class Settings(BaseModel):
     libretranslate_url: str = ""
     libretranslate_port: int = 5001
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
+    vmix: VmixSettings = Field(default_factory=VmixSettings)
     audio: AudioSettings = Field(default_factory=AudioSettings)
     asr: AsrSettings = Field(default_factory=AsrSettings)
 

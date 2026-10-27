@@ -1,5 +1,6 @@
 window.ADMIN_I18N = {
   nl: {
+    speaker: "Spreker spreekt", speakerHint: "Toets 1, 2, 3… wisselt de taal (bijv. voor een getuigenis).", testimony: "Getuigenis", vmixEnabled: "Nederlandse ondertiteling naar vMix sturen tijdens een getuigenis", vmixUrl: "vMix-adres (Web Controller)", vmixInput: "Titel-input", vmixField: "Tekstveld", vmixOverlay: "Overlay-kanaal", vmixMaxChars: "Max. tekens", vmixAuto: "Overlay automatisch aan bij een andere taal en uit bij Nederlands", overlayOn: "Overlay aan", overlayOff: "Overlay uit", vmixTest: "Testtekst", vmixTestText: "Dit is een test van de live vertaling.", vmixOk: "Verbonden met vMix ✓", vmixError: "vMix niet bereikbaar", vmixUnknown: "Nog geen contact met vMix", overlayShown: "overlay zichtbaar", overlayHidden: "overlay uit", vmixSavedInput: "Opgeslagen input", vmixHint: "Zet in vMix: Settings → Web Controller aan (poort 8088). Kies daarna ↻ om de inputs op te halen.",
     engine: "Vertaalmachine", nllbModel: "NLLB-model", nllbSmall: "600M – snel (~0,6 GB)", nllbLarge: "1.3B – beter (~1,4 GB)", cpuRecommended: "CPU (aanbevolen)", engineHint: "NLLB vertaalt rechtstreeks (zonder omweg via Engels) en is veel beter voor Oekraïens. De eerste keer wordt het model gedownload.",
     start: "Start vertaling", stop: "Stop", pause: "Pauze (lied)", resume: "Hervatten",
     stopped: "Gestopt", loading: "Model laden…", running: "Bezig", paused: "Gepauzeerd",
@@ -21,6 +22,7 @@ window.ADMIN_I18N = {
     statLatency: "Vertraging", statGpu: "GPU", uploadDone: "Bestand geüpload",
   },
   en: {
+    speaker: "Speaker is speaking", speakerHint: "Keys 1, 2, 3… switch the language (e.g. for a testimony).", testimony: "Testimony", vmixEnabled: "Send Dutch subtitles to vMix during a testimony", vmixUrl: "vMix address (Web Controller)", vmixInput: "Title input", vmixField: "Text field", vmixOverlay: "Overlay channel", vmixMaxChars: "Max. characters", vmixAuto: "Overlay on automatically for another language, off for the main language", overlayOn: "Overlay on", overlayOff: "Overlay off", vmixTest: "Test text", vmixTestText: "This is a test of the live translation.", vmixOk: "Connected to vMix ✓", vmixError: "vMix not reachable", vmixUnknown: "No contact with vMix yet", overlayShown: "overlay shown", overlayHidden: "overlay off", vmixSavedInput: "Saved input", vmixHint: "In vMix enable Settings → Web Controller (port 8088), then press ↻ to load the inputs.",
     engine: "Translation engine", nllbModel: "NLLB model", nllbSmall: "600M – fast (~0.6 GB)", nllbLarge: "1.3B – better (~1.4 GB)", cpuRecommended: "CPU (recommended)", engineHint: "NLLB translates directly (no detour through English) and is much better for Ukrainian. The model downloads the first time.",
     start: "Start translation", stop: "Stop", pause: "Pause (song)", resume: "Resume",
     stopped: "Stopped", loading: "Loading model…", running: "Running", paused: "Paused",
@@ -42,6 +44,7 @@ window.ADMIN_I18N = {
     statLatency: "Delay", statGpu: "GPU", uploadDone: "File uploaded",
   },
   ru: {
+    speaker: "Язык выступающего", speakerHint: "Клавиши 1, 2, 3… переключают язык (например, для свидетельства).", testimony: "Свидетельство", vmixEnabled: "Отправлять голландские субтитры в vMix во время свидетельства", vmixUrl: "Адрес vMix (Web Controller)", vmixInput: "Титр (input)", vmixField: "Текстовое поле", vmixOverlay: "Канал оверлея", vmixMaxChars: "Макс. символов", vmixAuto: "Оверлей включается при другом языке и выключается при основном", overlayOn: "Оверлей вкл", overlayOff: "Оверлей выкл", vmixTest: "Тестовый текст", vmixTestText: "Dit is een test van de live vertaling.", vmixOk: "Подключено к vMix ✓", vmixError: "vMix недоступен", vmixUnknown: "Связи с vMix ещё нет", overlayShown: "оверлей показан", overlayHidden: "оверлей выключен", vmixSavedInput: "Сохранённый input", vmixHint: "В vMix включите Settings → Web Controller (порт 8088), затем нажмите ↻, чтобы загрузить список.",
     engine: "Движок перевода", nllbModel: "Модель NLLB", nllbSmall: "600M – быстрая (~0,6 ГБ)", nllbLarge: "1.3B – лучше (~1,4 ГБ)", cpuRecommended: "CPU (рекомендуется)", engineHint: "NLLB переводит напрямую (без промежуточного английского) и гораздо лучше для украинского. Модель загружается при первом выборе.",
     start: "Начать перевод", stop: "Стоп", pause: "Пауза (песня)", resume: "Продолжить",
     stopped: "Остановлено", loading: "Загрузка модели…", running: "Работает", paused: "Пауза",
@@ -63,6 +66,7 @@ window.ADMIN_I18N = {
     statLatency: "Задержка", statGpu: "GPU", uploadDone: "Файл загружен",
   },
   uk: {
+    speaker: "Мова промовця", speakerHint: "Клавіші 1, 2, 3… перемикають мову (наприклад, для свідчення).", testimony: "Свідчення", vmixEnabled: "Надсилати нідерландські субтитри у vMix під час свідчення", vmixUrl: "Адреса vMix (Web Controller)", vmixInput: "Титр (input)", vmixField: "Текстове поле", vmixOverlay: "Канал оверлею", vmixMaxChars: "Макс. символів", vmixAuto: "Оверлей вмикається для іншої мови й вимикається для основної", overlayOn: "Оверлей увімк", overlayOff: "Оверлей вимк", vmixTest: "Тестовий текст", vmixTestText: "Dit is een test van de live vertaling.", vmixOk: "З'єднано з vMix ✓", vmixError: "vMix недоступний", vmixUnknown: "Зв'язку з vMix ще немає", overlayShown: "оверлей показано", overlayHidden: "оверлей вимкнено", vmixSavedInput: "Збережений input", vmixHint: "У vMix увімкніть Settings → Web Controller (порт 8088), потім натисніть ↻, щоб завантажити список.",
     engine: "Рушій перекладу", nllbModel: "Модель NLLB", nllbSmall: "600M – швидка (~0,6 ГБ)", nllbLarge: "1.3B – краща (~1,4 ГБ)", cpuRecommended: "CPU (рекомендовано)", engineHint: "NLLB перекладає напряму (без проміжної англійської) і значно краще для української. Модель завантажується під час першого вибору.",
     start: "Почати переклад", stop: "Стоп", pause: "Пауза (пісня)", resume: "Продовжити",
     stopped: "Зупинено", loading: "Завантаження моделі…", running: "Працює", paused: "Пауза",
