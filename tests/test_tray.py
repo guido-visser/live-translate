@@ -33,3 +33,26 @@ def test_exit_calls_back_and_stops_icon():
     tray.icon = FakeIcon()
     tray._exit()
     assert calls == ["exit", "icon stopped"]
+
+
+def test_interface_language_follows_installer(monkeypatch):
+    from livetranslate.languages import ui_language
+
+    monkeypatch.setenv("LIVETRANSLATE_UI_LANG", "uk")
+    assert ui_language() == "uk"
+    assert Tray(lambda: ("stopped", 0), "", "", lambda: None).texts is TEXTS["uk"]
+    monkeypatch.setenv("LIVETRANSLATE_UI_LANG", "xx")  # unknown: falls back to the OS locale
+    assert ui_language() in TEXTS
+
+
+def test_windowless_start_gets_writable_streams(monkeypatch):
+    import sys
+
+    from livetranslate.__main__ import ensure_streams
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    assert ensure_streams() is False
+    sys.stderr.write("progress bar\r")  # what tqdm does during model downloads
+    sys.stdout.close()
+    sys.stderr.close()

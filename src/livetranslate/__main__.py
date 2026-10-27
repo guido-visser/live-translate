@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 import time
@@ -24,11 +25,23 @@ def already_running(port: int) -> bool:
         return False
 
 
-def main() -> None:
-    # Under pythonw (no console window) there is no stdout/stderr at all.
-    for stream in (sys.stdout, sys.stderr):
-        if stream is not None and hasattr(stream, "reconfigure"):
+def ensure_streams() -> bool:
+    """Make stdout/stderr writable; returns whether there is a real console.
+
+    Under pythonw (no console window) both are None, and libraries that print progress
+    (e.g. the tqdm bars of Hugging Face model downloads) then crash on first start."""
+    console = sys.stdout is not None
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+        elif hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
+    return console
+
+
+def main() -> None:
+    console = ensure_streams()
 
     from .config import SettingsStore, data_dir
 
@@ -43,7 +56,7 @@ def main() -> None:
     handlers: list[logging.Handler] = [
         RotatingFileHandler(data / "livetranslate.log", maxBytes=2_000_000, backupCount=2, encoding="utf-8"),
     ]
-    if sys.stdout is not None:
+    if console:
         handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
