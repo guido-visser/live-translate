@@ -16,6 +16,10 @@ if (-not (Test-Path (Join-Path $bin "uv.exe"))) {
     Expand-Archive $zip -DestinationPath $bin -Force
 }
 
+# From here on, failures are checked via $LASTEXITCODE: under "Stop", Windows PowerShell 5.1
+# turns any stderr output of a native program (uv logs progress there) into an error.
+$ErrorActionPreference = "Continue"
+
 & (Join-Path $bin "uv.exe") lock --project $root
 if ($LASTEXITCODE -ne 0) { throw "uv lock failed" }
 
