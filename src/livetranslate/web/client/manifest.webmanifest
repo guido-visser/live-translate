@@ -1,0 +1,8 @@
+{
+  "name": "Live translation",
+  "short_name": "Translation",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111418",
+  "theme_color": "#111418"
+}

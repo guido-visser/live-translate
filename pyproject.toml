@@ -1,0 +1,45 @@
+[project]
+name = "livetranslate"
+version = "0.1.0"
+description = "Local, live translation of church services to listeners' phones"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "platformdirs>=4.0",
+    "numpy>=1.26",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12",
+    "soxr>=0.3.7",
+    "segno>=1.6",
+    "faster-whisper>=1.1",
+    # CUDA 12 runtime libraries for faster-whisper (CTranslate2) on NVIDIA GPUs.
+    "nvidia-cublas-cu12; sys_platform != 'darwin'",
+    "nvidia-cudnn-cu12>=9,<10; sys_platform != 'darwin'",
+    "nvidia-ml-py>=12; sys_platform != 'darwin'",
+    # WASAPI loopback capture ("what you hear") on Windows.
+    "PyAudioWPatch>=0.2.12; sys_platform == 'win32'",
+    "piper-tts>=1.3",
+    "lameenc>=1.7",
+]
+
+[project.scripts]
+livetranslate = "livetranslate.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/livetranslate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

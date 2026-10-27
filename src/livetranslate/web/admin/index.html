@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Translate</title>
+  <link rel="stylesheet" href="/static/admin/admin.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Live Translate</h1>
+    <div class="pills">
+      <span id="statePill" class="pill"></span>
+      <span id="trPill" class="pill"></span>
+    </div>
+    <select id="uiLang" aria-label="Language">
+      <option value="nl">Nederlands</option>
+      <option value="en">English</option>
+      <option value="ru">Русский</option>
+      <option value="uk">Українська</option>
+    </select>
+  </header>
+
+  <main class="grid">
+    <section class="card controls">
+      <div class="buttons">
+        <button id="startBtn" class="big primary" type="button"></button>
+        <button id="pauseBtn" class="big" type="button" disabled></button>
+      </div>
+      <p id="error" class="error" hidden></p>
+      <p id="trDetail" class="muted small" hidden></p>
+      <div class="meter-row">
+        <span data-t="level"></span>
+        <div class="meter"><div id="meterFill"></div></div>
+        <span id="levelText" class="mono small"></span>
+      </div>
+    </section>
+
+    <section class="card qr-card">
+      <h2 data-t="share"></h2>
+      <img id="qrImg" alt="QR code" width="220" height="220">
+      <p><a id="url" class="mono" target="_blank" rel="noopener"></a></p>
+      <p id="wifiLine" class="muted"></p>
+      <button id="qrFull" type="button" data-t="fullscreenQr"></button>
+    </section>
+
+    <section class="card">
+      <h2 data-t="listeners"></h2>
+      <table class="listeners"><tbody id="listenerRows"></tbody></table>
+    </section>
+
+    <section class="card transcript-card">
+      <h2 data-t="transcript"></h2>
+      <div id="transcript" class="transcript"></div>
+      <p id="partial" class="partial"></p>
+    </section>
+
+    <section class="card settings">
+      <h2 data-t="settings"></h2>
+      <form id="settingsForm">
+        <fieldset>
+          <legend data-t="audio"></legend>
+          <div class="seg-control" role="radiogroup">
+            <label><input type="radio" name="kind" value="device"><span data-t="kindDevice"></span></label>
+            <label><input type="radio" name="kind" value="loopback"><span data-t="kindLoopback"></span></label>
+            <label><input type="radio" name="kind" value="file"><span data-t="kindFile"></span></label>
+          </div>
+          <div class="row" id="deviceRow">
+            <label for="device" data-t="device"></label>
+            <div class="inline">
+              <select id="device"></select>
+              <button id="refreshDevices" type="button" title="Refresh">↻</button>
+            </div>
+          </div>
+          <div class="row" id="channelRow">
+            <label for="channel" data-t="channel"></label>
+            <select id="channel"></select>
+          </div>
+          <div class="row" id="fileRow">
+            <label for="filePath" data-t="file"></label>
+            <div class="inline">
+              <input id="filePath" type="text" placeholder="C:\…\preek.wav">
+              <label class="button-like"><input id="fileUpload" type="file" accept="audio/*" hidden><span data-t="choose"></span></label>
+            </div>
+          </div>
+          <div class="row">
+            <label for="gain"><span data-t="gain"></span> <span id="gainText" class="mono"></span></label>
+            <input id="gain" type="range" min="0.25" max="4" step="0.25">
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend data-t="recognition"></legend>
+          <div class="row">
+            <label for="sourceLang" data-t="sourceLang"></label>
+            <select id="sourceLang"></select>
+          </div>
+          <div class="row">
+            <label for="model" data-t="model"></label>
+            <select id="model"></select>
+          </div>
+          <div class="row">
+            <label for="asrDevice" data-t="processor"></label>
+            <select id="asrDevice">
+              <option value="auto" data-t="auto"></option>
+              <option value="cuda">GPU (NVIDIA)</option>
+              <option value="cpu">CPU</option>
+            </select>
+          </div>
+          <p class="muted small" data-t="modelHint"></p>
+        </fieldset>
+
+        <fieldset>
+          <legend data-t="translation"></legend>
+          <p class="muted small" data-t="targetsHint"></p>
+          <div id="targets" class="targets"></div>
+          <label class="check"><input id="tts" type="checkbox"> <span data-t="tts"></span></label>
+        </fieldset>
+
+        <fieldset>
+          <legend data-t="network"></legend>
+          <div class="row">
+            <label for="address" data-t="address"></label>
+            <select id="address"></select>
+          </div>
+          <div class="row">
+            <label for="wifi" data-t="wifi"></label>
+            <input id="wifi" type="text">
+          </div>
+          <div class="row">
+            <label for="pin" data-t="pin"></label>
+            <input id="pin" type="text" inputmode="numeric" autocomplete="off">
+          </div>
+        </fieldset>
+
+        <div class="save-row">
+          <button class="primary" type="submit" data-t="save"></button>
+          <span id="saved" class="muted" hidden></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 data-t="performance"></h2>
+      <dl id="stats" class="stats"></dl>
+    </section>
+  </main>
+
+  <script src="/static/admin/i18n.js"></script>
+  <script src="/static/admin/admin.js"></script>
+</body>
+</html>

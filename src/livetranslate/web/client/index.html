@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111418">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Live translation</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/static/client/style.css">
+</head>
+<body>
+  <header class="bar">
+    <button id="langChip" class="chip" type="button" aria-haspopup="dialog">
+      <span class="globe" aria-hidden="true">🌐</span><span id="langName">…</span>
+    </button>
+    <div class="bar-actions">
+      <button id="audioBtn" class="icon-btn" type="button" aria-pressed="false" hidden>
+        <span class="icon" aria-hidden="true">🔈</span><span id="audioLabel" class="label"></span>
+      </button>
+      <button id="fontBtn" class="icon-btn" type="button" aria-label="Text size"><span class="icon">Aa</span></button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="feed" aria-live="polite">
+    <p id="empty" class="empty"></p>
+  </main>
+  <div id="partial" class="partial" hidden></div>
+  <div id="typing" class="typing" hidden aria-hidden="true"><span></span><span></span><span></span></div>
+  <button id="jump" class="jump" type="button" hidden>↓</button>
+
+  <div id="picker" class="picker" role="dialog" aria-modal="true" aria-labelledby="pickerTitle" hidden>
+    <div class="picker-inner">
+      <h1 id="pickerTitle">Kies je taal · Оберіть мову · Выберите язык · Choose your language</h1>
+      <div id="langList" class="lang-list"></div>
+      <button id="pickerClose" class="picker-close" type="button" hidden>✕</button>
+    </div>
+  </div>
+
+  <div id="fontPanel" class="font-panel" hidden>
+    <button type="button" data-font="-1" aria-label="Smaller">A−</button>
+    <button type="button" data-font="1" aria-label="Larger">A+</button>
+    <button type="button" id="themeBtn" aria-label="Light or dark">◐</button>
+  </div>
+
+  <audio id="audio" preload="none"></audio>
+  <video id="keepAwake" muted playsinline loop hidden></video>
+
+  <script src="/static/client/i18n.js"></script>
+  <script src="/static/client/app.js"></script>
+</body>
+</html>
