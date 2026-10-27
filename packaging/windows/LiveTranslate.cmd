@@ -4,6 +4,16 @@ rem model runtime and LibreTranslate; later starts work offline.
 setlocal
 title Live Translate
 set "APP=%~dp0"
+
+rem Never run elevated (e.g. started from the installer): an elevated uv refuses
+rem the Python folder links it made as the normal user ("untrusted mount point",
+rem os error 448). fltmc only succeeds as admin; explorer restarts us unelevated.
+fltmc >nul 2>&1
+if not errorlevel 1 (
+    explorer.exe "%APP%LiveTranslate.vbs"
+    exit /b 0
+)
+
 set "DATA=%LOCALAPPDATA%\LiveTranslate"
 set "UV=%APP%bin\uv.exe"
 set "UV_PROJECT_ENVIRONMENT=%DATA%\venv"

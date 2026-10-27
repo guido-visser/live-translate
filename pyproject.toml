@@ -1,6 +1,6 @@
 [project]
 name = "livetranslate"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local, live translation of church services to listeners' phones"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
