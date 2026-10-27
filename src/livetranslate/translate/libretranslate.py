@@ -92,12 +92,11 @@ class LibreTranslate:
         await self._wait_ready(timeout=1800)
 
     async def _ensure_installed(self) -> Path:
+        # Always our own environment: a libretranslate found on PATH may belong to a
+        # Python it doesn't run on (e.g. 3.14 breaks its spaCy/pydantic v1 imports).
         exe = _venv_exe(self.env_dir, "libretranslate")
         if exe.exists():
             return exe
-        found = shutil.which("libretranslate")
-        if found:
-            return Path(found)
         self.status, self.detail = "installing", "Installing LibreTranslate (one time, needs internet)…"
         log.info("Installing LibreTranslate into %s", self.env_dir)
         uv = os.environ.get("LIVETRANSLATE_UV") or shutil.which("uv")

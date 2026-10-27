@@ -10,6 +10,8 @@ set "UV_PROJECT_ENVIRONMENT=%DATA%\venv"
 set "UV_PYTHON_INSTALL_DIR=%DATA%\python"
 set "UV_PYTHON_PREFERENCE=only-managed"
 set "UV_CACHE_DIR=%DATA%\uv-cache"
+rem The CUDA/torch wheels are large; uv's default 30 s timeout is too short on slow links.
+set "UV_HTTP_TIMEOUT=300"
 set "LIVETRANSLATE_UV=%UV%"
 
 set "VER=dev"
@@ -22,6 +24,12 @@ if not exist "%MARKER%" (
     echo  Please keep this window open...
     echo.
     "%UV%" sync --frozen --no-dev --no-editable --project "%APP%."
+    if errorlevel 1 (
+        echo.
+        echo  Download interrupted, trying once more...
+        echo.
+        "%UV%" sync --frozen --no-dev --no-editable --project "%APP%."
+    )
     if errorlevel 1 (
         echo.
         echo  Setup failed. Check the internet connection and start Live Translate again.
