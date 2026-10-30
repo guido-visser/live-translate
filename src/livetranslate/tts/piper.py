@@ -52,6 +52,11 @@ STREAM_RATE = 22050
 FRAME_SECONDS = 0.1
 FRAME_SAMPLES = int(STREAM_RATE * FRAME_SECONDS)
 BITRATE_KBPS = 48
+# Spoken audio waiting to be played; beyond this the oldest waiting sentences are skipped
+# (they are still on screen), so the voice never falls far behind the speaker.
+MAX_BACKLOG_S = 8.0
+# Audio each phone may have waiting on the server before it skips some.
+CLIENT_BUFFER_S = 3.0
 
 
 def _new_encoder():
@@ -155,7 +160,7 @@ class LanguageStream:
         self._texts.put_nowait(text)
 
     def subscribe(self) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        queue: asyncio.Queue = asyncio.Queue(maxsize=int(CLIENT_BUFFER_S / FRAME_SECONDS))
         queue.put_nowait(_silence_preroll(0.5))
         self.clients.add(queue)
         if not self._tasks:
@@ -174,20 +179,29 @@ class LanguageStream:
                 self._texts.get_nowait()
 
     async def _synth(self) -> None:
-        gap = np.zeros(int(STREAM_RATE * 0.3), dtype=np.int16)
+        gap = np.zeros(int(STREAM_RATE * 0.15), dtype=np.int16)
         while True:
             text = await self._texts.get()
-            # Speak a bit faster when we are falling behind the speaker.
+            # Speak faster as soon as we fall behind the speaker: translations are often
+            # longer than what was said, so at normal speed the voice keeps losing ground.
             backlog = self.backlog_seconds
-            length_scale = 1.0 if backlog < 3 else 0.88 if backlog < 8 else 0.78
+            length_scale = 1.0 if backlog < 1.5 else 0.85 if backlog < 4 else 0.75
             try:
                 audio = await asyncio.to_thread(self.bank.synthesize, self.lang, text, length_scale)
             except Exception:
                 log.exception("TTS failed for %s", self.lang)
                 continue
-            for part in (audio, gap):
-                self._pcm.append(part)
-                self._pcm_samples += len(part)
+            self._add(np.concatenate((audio, gap)))
+
+    def _add(self, sentence: np.ndarray) -> None:
+        # Skip the oldest sentences that haven't started playing ([0] may be playing).
+        while len(self._pcm) > 1 and self._pcm_samples + len(sentence) > MAX_BACKLOG_S * STREAM_RATE:
+            skipped = self._pcm[1]
+            del self._pcm[1]
+            self._pcm_samples -= len(skipped)
+            log.info("Spoken %s is behind; skipped a sentence", self.lang)
+        self._pcm.append(sentence)
+        self._pcm_samples += len(sentence)
 
     def _take_frame(self) -> np.ndarray:
         out = np.zeros(FRAME_SAMPLES, dtype=np.int16)
