@@ -73,6 +73,35 @@ class VmixSettings(BaseModel):
     auto_overlay: bool = True
 
 
+class GlossaryEntry(BaseModel):
+    """A word the speech recognition should know, optionally with fixed translations."""
+
+    lang: str = "nl"  # language the word is spoken in
+    # One or more forms, comma-separated ("gemeente, gemeenten"). A form with a capital
+    # letter only matches with that capital ("Heer" is the Lord, "heer" is Mr.).
+    term: str
+    # Language code → the translation to always use. "en" also serves as the hint for
+    # languages left empty; with no English either, the word is translated normally.
+    translations: dict[str, str] = Field(default_factory=dict)
+
+
+def default_glossary() -> list[GlossaryEntry]:
+    """Dutch church words the translation engines tend to get wrong ("gemeente" → municipality).
+
+    English only: the English word steers every other language. These English words
+    tested best inside Dutch sentences with NLLB ("donations", not "offering" = sacrifice).
+    """
+    rows = [
+        ("gemeente", "church"),
+        ("heilig avondmaal, avondmaal", "the Lord's Supper"),
+        ("dominee, voorganger", "pastor"),
+        ("ouderling", "elder"),
+        ("diaken", "deacon"),
+        ("collecte", "donations"),
+    ]
+    return [GlossaryEntry(term=term, translations={"en": en}) for term, en in rows]
+
+
 class Settings(BaseModel):
     source_language: str = "nl"
     target_languages: list[str] = Field(default_factory=lambda: ["ru", "uk", "en"])
@@ -89,6 +118,7 @@ class Settings(BaseModel):
     libretranslate_url: str = ""
     libretranslate_port: int = 5001
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
+    glossary: list[GlossaryEntry] = Field(default_factory=default_glossary)
     vmix: VmixSettings = Field(default_factory=VmixSettings)
     audio: AudioSettings = Field(default_factory=AudioSettings)
     asr: AsrSettings = Field(default_factory=AsrSettings)

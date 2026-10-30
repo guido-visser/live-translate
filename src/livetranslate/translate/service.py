@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from ..config import Settings
+from .glossary import Glossary
 from .libretranslate import LibreTranslate
 from .nllb import NllbTranslator
 
@@ -17,6 +18,7 @@ class TranslationService:
         self.libre = LibreTranslate(settings, data_dir)
         self.nllb = NllbTranslator(settings, data_dir)
         self.engine = settings.translation.engine
+        self.glossary = Glossary(settings.glossary)
 
     @property
     def active(self) -> LibreTranslate | NllbTranslator:
@@ -46,7 +48,18 @@ class TranslationService:
         return self.active.name_of(code)
 
     async def translate(self, text: str, source: str, target: str) -> str:
-        return await self.active.translate(text, source, target)
+        engine = self.active
+        prepared, terms = self.glossary.prepare(text, source, target, inline=engine is self.nllb)
+        if prepared == text:
+            return await engine.translate(text, source, target)
+        result = await engine.translate(prepared, source, target)
+        if not terms:
+            return result
+        restored = self.glossary.restore(result, terms)
+        if restored is None:
+            log.info("Glossary placeholder lost in %r; translating without the glossary", result)
+            return await engine.translate(text, source, target)
+        return restored
 
     async def start(self) -> None:
         await self.active.start()

@@ -179,6 +179,18 @@ input[type=range] { width: 100%; }
   border-top: 1px solid var(--border); border-radius: 0 0 12px 12px;
 }
 .save-bar .error { margin: 0; }
+.glossary-wrap { overflow-x: auto; margin-bottom: 4px; }
+.glossary { width: 100%; border-collapse: collapse; }
+.glossary th { font-size: 13px; color: var(--muted); font-weight: 600; text-align: left; padding: 0 6px 6px 0; white-space: nowrap; }
+.glossary td { padding: 0 6px 6px 0; min-width: 120px; }
+.glossary td:first-child { min-width: 170px; }
+.glossary td:last-child, .glossary th:last-child { min-width: 0; width: 1%; padding-right: 0; }
+.glossary .remove { padding: 6px 10px; color: var(--muted); }
+.glossary .remove:hover { color: var(--danger); border-color: var(--danger); }
+.warn-text { color: var(--warn); font-weight: 600; }
+.glossary-result { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 12px 0 0; }
+.glossary-result dt { color: var(--muted); }
+.glossary-result dd { margin: 0; }
 @media (max-width: 600px) { .row.pair { grid-template-columns: 1fr; } }
 
 /* -- main screen: side column, quick audio, header toggle ------------------------ */

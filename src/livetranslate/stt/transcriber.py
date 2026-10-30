@@ -277,11 +277,12 @@ class WhisperEngine:
         self.beam_size = settings.beam_size
         self._vad_options = None
 
-    def transcribe(self, audio: np.ndarray, prompt: str) -> list[Word]:
+    def transcribe(self, audio: np.ndarray, prompt: str, hotwords: str = "") -> list[Word]:
         segments, _info = self.model.transcribe(
             audio,
             language=self.language,
             initial_prompt=prompt or None,
+            hotwords=hotwords or None,  # glossary words: names and church terms
             beam_size=self.beam_size,
             word_timestamps=True,
             condition_on_previous_text=False,

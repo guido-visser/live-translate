@@ -215,9 +215,11 @@ class Pipeline:
         def on_sentence(text: str) -> None:
             loop.call_soon_threadsafe(self._sentences.put_nowait, (text, time.time(), engine.language))
 
-        transcriber = StreamingTranscriber(
-            self._engine.transcribe, self._engine.has_speech, on_partial, on_sentence, self.settings.asr
-        )
+        def transcribe(audio: np.ndarray, prompt: str):
+            # Read per pass, so glossary changes apply without a restart.
+            return engine.transcribe(audio, prompt, self.translator.glossary.hotwords(engine.language))
+
+        transcriber = StreamingTranscriber(transcribe, engine.has_speech, on_partial, on_sentence, self.settings.asr)
         was_paused = False
         while not self._stop.is_set():
             try:

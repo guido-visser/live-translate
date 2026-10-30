@@ -26,6 +26,7 @@
       <button type="button" role="tab" data-tab="audio" data-t="tabAudio"></button>
       <button type="button" role="tab" data-tab="languages" data-t="tabLanguages"></button>
       <button type="button" role="tab" data-tab="quick" data-t="tabQuick"></button>
+      <button type="button" role="tab" data-tab="glossary" data-t="tabGlossary"></button>
       <button type="button" role="tab" data-tab="vmix" data-t="tabVmix"></button>
       <button type="button" role="tab" data-tab="network" data-t="tabNetwork"></button>
     </nav>
@@ -123,6 +124,30 @@
       <section class="tab-panel" data-panel="quick" role="tabpanel">
         <h2 data-t="quickLanguages"></h2>
         <div id="quick" class="targets"></div>
+      </section>
+
+      <!-- Glossary -->
+      <section class="tab-panel" data-panel="glossary" role="tabpanel">
+        <h2 data-t="glossary"></h2>
+        <p class="muted small" data-t="glossaryHelp"></p>
+        <div class="glossary-wrap">
+          <table class="glossary">
+            <thead><tr id="glossaryHead"></tr></thead>
+            <tbody id="glossaryRows"></tbody>
+          </table>
+        </div>
+        <p id="glossaryEmpty" class="muted small" data-t="glossaryEmpty" hidden></p>
+        <div class="inline-buttons">
+          <button id="glossaryAdd" type="button" data-t="glossaryAdd"></button>
+          <span id="glossaryLong" class="small warn-text" data-t="glossaryLong" hidden></span>
+        </div>
+
+        <h2 data-t="glossaryTest"></h2>
+        <div class="inline">
+          <input id="glossarySample" type="text">
+          <button id="glossaryTry" type="button" data-t="glossaryTry"></button>
+        </div>
+        <dl id="glossaryResult" class="glossary-result"></dl>
       </section>
 
       <!-- vMix -->

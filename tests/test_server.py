@@ -253,3 +253,18 @@ def test_admin_pages_start_in_installer_language(client, monkeypatch):
     r = client.get("/admin/defaults.js")
     assert r.status_code == 200
     assert r.text.strip() == 'window.LT_UI_LANG = "ru";'
+
+
+def test_glossary_is_saved_and_used_right_away(client):
+    settings = client.get("/api/admin/state").json()["settings"]
+    assert any(e["term"] == "gemeente" for e in settings["glossary"])  # the starter list
+    settings["glossary"] = [{"lang": "nl", "term": "Jansen", "translations": {"ru": "Янсен"}}]
+    client.services.translator._loaded = ("en", "nl", "ru", "uk")  # avoid a real restart
+    client.post("/api/admin/settings", json=settings)
+
+    assert client.services.translator.glossary.hotwords("nl") == "Jansen"
+    result = client.post("/api/admin/glossary/test", json={"text": "Dominee Jansen bidt."}).json()
+    assert result == {
+        "ru": {"text": "[ru] Dominee Янсен bidt.", "back": "[en] [ru] Dominee Янсен bidt."},
+        "uk": {"text": "[uk] Dominee Jansen bidt.", "back": "[en] [uk] Dominee Jansen bidt."},
+    }

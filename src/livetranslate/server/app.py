@@ -18,6 +18,7 @@ from ..config import Settings, SettingsStore, data_dir as default_data_dir
 from ..integrations.vmix import VmixOutput
 from ..languages import RTL, native_name, ui_language
 from ..pipeline import WHISPER_LANGUAGES, Pipeline
+from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
 from .hub import Connection, Hub
@@ -255,7 +256,9 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         new.port = old.port  # the port only changes on restart (it is in the QR code)
         services.store.save(new)
         services.speech.enabled = new.tts_enabled
-        if new.translation != old.translation:
+        if new.glossary != old.glossary:
+            services.translator.glossary = Glossary(new.glossary)
+        if new.translation != old.translation or new.glossary != old.glossary:
             # Earlier sentences get re-translated by the new engine when someone asks for them.
             services.pipeline.clear_translations()
 
@@ -328,6 +331,33 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         if not await services.vmix.show(text):
             raise HTTPException(502, services.vmix.status["error"] or "Choose a vMix input and field first")
         return services.vmix.status
+
+    @app.post("/api/admin/glossary/test")
+    async def glossary_test(request: Request):
+        """Translate a sample sentence with the saved glossary, to check the words."""
+        require_admin(request)
+        text = str((await request.json()).get("text") or "").strip()[:500]
+        s = services.settings
+        langs = [l for l in s.target_languages if l != s.source_language]
+        if not text or not langs:
+            return {}
+        # Sentence by sentence, as during a service (NLLB tends to drop a short first sentence otherwise).
+        sentences = [p for p in re.split(r"(?<=[.!?…])\s+", text) if p]
+
+        async def translate(lang: str) -> dict:
+            parts = [await services.translator.translate(p, s.source_language, lang) for p in sentences]
+            result = {"text": " ".join(parts)}
+            if lang != "en":
+                # Back into English, so an operator who can't read Russian can check the meaning.
+                back = [await services.translator.translate(p, lang, "en") for p in parts]
+                result["back"] = " ".join(back)
+            return result
+
+        try:
+            results = await asyncio.gather(*(translate(lang) for lang in langs))
+        except Exception as exc:
+            raise HTTPException(503, f"Translation is not available: {exc}") from exc
+        return dict(zip(langs, results))
 
     @app.post("/api/admin/translator/restart")
     async def restart_translator(request: Request):

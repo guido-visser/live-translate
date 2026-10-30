@@ -7,6 +7,7 @@
   let state = null;
   let devices = [];
   let vmixState = null; // inputs reported by vMix
+  let glossary = []; // every glossary entry (all spoken languages), edited in place
   let dirty = false;
 
   // -- tabs --------------------------------------------------------------------------
@@ -114,8 +115,145 @@
     src.value = wanted;
   }
 
-  $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); renderVmixLanguages(); });
+  $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); renderVmixLanguages(); renderGlossary(); });
   $("engine").addEventListener("change", () => ($("nllbRows").hidden = $("engine").value !== "nllb"));
+
+  // -- glossary --------------------------------------------------------------------------
+
+  // Whisper reads roughly the first 600 characters of the word list.
+  const HOTWORD_CHARS = 600;
+
+  function glossaryInput(value, lang, placeholder, onInput) {
+    const td = document.createElement("td");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.lang = lang;
+    input.value = value;
+    input.placeholder = placeholder;
+    input.addEventListener("input", () => { onInput(input.value); checkGlossaryLength(); });
+    td.appendChild(input);
+    return td;
+  }
+
+  // One row per word in the main language. English comes first: it also steers the
+  // other listener languages, whose columns only override it.
+  function renderGlossary() {
+    const main = $("sourceLang").value;
+    const others = [...$("targets").querySelectorAll("input:checked")].map((i) => i.value).filter((c) => c !== "en");
+    const langs = [...(main === "en" ? [] : ["en"]), ...sortByName(others)];
+    const head = $("glossaryHead");
+    head.textContent = "";
+    for (const text of [`${t("glossaryWord")} (${langName(main)})`, ...langs.map((c) => langName(c)), ""]) {
+      const th = document.createElement("th");
+      th.textContent = text;
+      head.appendChild(th);
+    }
+    const body = $("glossaryRows");
+    body.textContent = "";
+    const rows = glossary.filter((e) => e.lang === main);
+    for (const entry of rows) {
+      const tr = document.createElement("tr");
+      tr.appendChild(glossaryInput(entry.term, main, t("glossaryWordHint"), (v) => (entry.term = v)));
+      // Empty override boxes say what they fall back to: the English word, or a normal translation.
+      const overrides = [];
+      const showFallback = () => {
+        const text = entry.translations.en?.trim() ? t("glossaryViaEnglish") : t("glossaryAuto");
+        overrides.forEach((input) => (input.placeholder = text));
+      };
+      for (const code of langs) {
+        const english = code === "en";
+        const td = glossaryInput(entry.translations[code] || "", code, english ? t("glossaryEnglishHint") : "", (v) => {
+          entry.translations[code] = v;
+          if (english) showFallback();
+        });
+        if (!english) overrides.push(td.firstChild);
+        tr.appendChild(td);
+      }
+      showFallback();
+      const td = document.createElement("td");
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove";
+      remove.textContent = "✕";
+      remove.title = remove.ariaLabel = t("glossaryRemove");
+      remove.addEventListener("click", () => {
+        glossary.splice(glossary.indexOf(entry), 1);
+        markDirty();
+        renderGlossary();
+      });
+      td.appendChild(remove);
+      tr.appendChild(td);
+      body.appendChild(tr);
+    }
+    $("glossaryEmpty").hidden = rows.length > 0;
+    $("glossarySample").placeholder = t("glossarySample");
+    checkGlossaryLength();
+  }
+
+  function checkGlossaryLength() {
+    const main = $("sourceLang").value;
+    const words = glossary.filter((e) => e.lang === main).flatMap((e) => e.term.split(",").map((w) => w.trim()).filter(Boolean));
+    $("glossaryLong").hidden = [...new Set(words)].join(", ").length <= HOTWORD_CHARS;
+  }
+
+  function collectGlossary() {
+    return glossary
+      .filter((e) => e.term.trim())
+      .map((e) => ({
+        lang: e.lang,
+        term: e.term.trim(),
+        translations: Object.fromEntries(
+          Object.entries(e.translations).map(([code, text]) => [code, text.trim()]).filter(([, text]) => text),
+        ),
+      }));
+  }
+
+  $("targets").addEventListener("change", renderGlossary);
+  $("glossaryAdd").addEventListener("click", () => {
+    glossary.push({ lang: $("sourceLang").value, term: "", translations: {} });
+    markDirty();
+    renderGlossary();
+    const inputs = $("glossaryRows").querySelectorAll("tr:last-child input");
+    inputs[0]?.focus();
+  });
+
+  async function tryGlossary() {
+    const text = $("glossarySample").value.trim();
+    const box = $("glossaryResult");
+    if (!text) return;
+    if (dirty) await save();
+    box.textContent = "";
+    try {
+      const result = await api("/api/admin/glossary/test", { method: "POST", body: JSON.stringify({ text }) });
+      for (const [code, { text: translated, back }] of Object.entries(result)) {
+        const dt = document.createElement("dt");
+        dt.textContent = langName(code);
+        const dd = document.createElement("dd");
+        const main = document.createElement("div");
+        main.lang = code;
+        main.textContent = translated;
+        dd.appendChild(main);
+        if (back) {
+          const check = document.createElement("div");
+          check.className = "muted small";
+          check.lang = "en";
+          check.textContent = `${t("glossaryBack")}: ${back}`;
+          dd.appendChild(check);
+        }
+        box.append(dt, dd);
+      }
+    } catch (err) {
+      const dd = document.createElement("dd");
+      dd.className = "error";
+      dd.textContent = err.message;
+      box.append(dd);
+    }
+  }
+
+  $("glossaryTry").addEventListener("click", tryGlossary);
+  $("glossarySample").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); tryGlossary(); }
+  });
 
   // -- vMix ------------------------------------------------------------------------------
 
@@ -243,6 +381,8 @@
     $("nllbModel").value = s.translation.nllb_model;
     $("nllbDevice").value = s.translation.nllb_device;
     $("nllbRows").hidden = s.translation.engine !== "nllb";
+    glossary = structuredClone(s.glossary);
+    renderGlossary();
 
     $("vmixEnabled").checked = s.vmix.enabled;
     $("vmixUrl").value = s.vmix.url;
@@ -277,6 +417,7 @@
     s.translation.engine = $("engine").value;
     s.translation.nllb_model = $("nllbModel").value;
     s.translation.nllb_device = $("nllbDevice").value;
+    s.glossary = collectGlossary();
 
     s.vmix.enabled = $("vmixEnabled").checked;
     s.vmix.url = $("vmixUrl").value.trim() || "http://127.0.0.1:8088";
@@ -312,8 +453,10 @@
     $("saved").hidden = false;
   }
 
-  form.addEventListener("input", markDirty);
-  form.addEventListener("change", markDirty);
+  // The test sentence is not a setting.
+  const isSetting = (e) => e.target.id !== "glossarySample";
+  form.addEventListener("input", (e) => isSetting(e) && markDirty());
+  form.addEventListener("change", (e) => isSetting(e) && markDirty());
   form.addEventListener("submit", (e) => { e.preventDefault(); save(); });
   window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
 
@@ -340,6 +483,7 @@
     renderQuick();
     renderAddresses();
     renderVmixLanguages();
+    renderGlossary();
   });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));
