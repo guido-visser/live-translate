@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..audio.devices import list_all
@@ -22,6 +22,7 @@ from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
+from ..tunnel import Tunnel
 from ..updater import Updater
 from .hub import Connection, Hub
 from .network import GpuStats, lan_addresses, listener_url, qr_svg
@@ -31,6 +32,34 @@ log = logging.getLogger(__name__)
 WEB = Path(__file__).resolve().parent.parent / "web"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 WHISPER_MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
+# What phones may reach through the internet tunnel: the listener page and nothing else.
+TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/api/public", "/ws/listen", "/static/icon.png"}
+TUNNEL_PREFIXES = ("/static/client/", "/audio/")
+
+
+class TunnelGuard:
+    """Requests that arrive through the tunnel port only get the listener pages.
+
+    Over the tunnel every visitor seems to come from this PC (127.0.0.1), which would
+    otherwise make them operators; the port they arrive on tells them apart."""
+
+    def __init__(self, app, tunnel: Tunnel):
+        self.app = app
+        self.tunnel = tunnel
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            server = scope.get("server") or (None, None)
+            path = scope["path"]
+            if server[1] == self.tunnel.local_port and not (path in TUNNEL_PATHS or path.startswith(TUNNEL_PREFIXES)):
+                if scope["type"] == "http":
+                    response = PlainTextResponse("Not available over the internet.", status_code=403)
+                    await response(scope, receive, send)
+                else:
+                    await receive()  # websocket.connect
+                    await send({"type": "websocket.close", "code": 4403})
+                return
+        await self.app(scope, receive, send)
 
 
 class Services:
@@ -45,10 +74,18 @@ class Services:
         self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data, self.vmix)
         self.gpu = GpuStats()
         self.updater = Updater(data, lambda: self.pipeline.state == "stopped")
+        self.tunnel = Tunnel(data, store.settings.remote.local_port)
 
     @property
     def settings(self) -> Settings:
         return self.store.settings
+
+    def listener_url(self) -> str:
+        """The address in the QR code: the public one when listeners come over the internet."""
+        s = self.settings
+        if s.remote.enabled and s.remote.public_url.strip():
+            return s.remote.public_url.strip().rstrip("/") + "/"
+        return listener_url(s.public_host, s.port)
 
     def listener_languages(self) -> list[dict]:
         source = self.settings.source_language
@@ -86,15 +123,18 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             tasks.append(asyncio.create_task(_check_native(services)))
             tasks.append(asyncio.create_task(_start_translator(services)))
             tasks.append(asyncio.create_task(services.updater.run_checks(lambda: services.settings.check_updates)))
+            await services.tunnel.apply(services.settings.remote)
         yield
         for task in tasks:
             task.cancel()
+        await services.tunnel.stop()
         await services.pipeline.stop()
         await services.translator.close()
         await services.vmix.close()
 
     app = FastAPI(title="Live Translate", lifespan=lifespan)
     app.state.services = services
+    app.add_middleware(TunnelGuard, tunnel=services.tunnel)
     app.mount("/static", StaticFiles(directory=WEB), name="static")
 
     def require_admin(request: Request | WebSocket) -> None:
@@ -149,7 +189,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     async def public_info():
         s = services.settings
         return {
-            "url": listener_url(s.public_host, s.port),
+            "url": services.listener_url(),
             "wifi": s.wifi_name,
             "languages": services.listener_languages(),
         }
@@ -157,7 +197,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     @app.get("/api/qr.svg")
     async def qr():
         s = services.settings
-        svg = qr_svg(listener_url(s.public_host, s.port))
+        svg = qr_svg(services.listener_url())
         return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache"})
 
     @app.get("/audio/{lang}.mp3")
@@ -233,12 +273,13 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             "vmix": services.vmix.status,
             "translator": translator_status(tr),
             "update": services.updater.status(),
+            "tunnel": services.tunnel.status(),
             "source_languages": sources,
             "target_languages": sorted(targets, key=lambda l: l["name"].lower()),
             "tts_languages": sorted(l for l in services.speech.bank_languages()),
             "models": WHISPER_MODELS,
             "addresses": lan_addresses(),
-            "url": listener_url(s.public_host, s.port),
+            "url": services.listener_url(),
             "history": [
                 {"id": seg.id, "text": seg.source, "lang": seg.lang} for seg in list(services.pipeline.history)[-30:]
             ],
@@ -260,6 +301,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         old = services.settings
         new = Settings.model_validate(await request.json())
         new.port = old.port  # the port only changes on restart (it is in the QR code)
+        new.remote.local_port = old.remote.local_port  # bound at start
         services.store.save(new)
         services.speech.enabled = new.tts_enabled
         if new.glossary != old.glossary:
@@ -281,6 +323,8 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         audio_changed = new.audio.model_copy(update={"gain": old.audio.gain}) != old.audio
         if audio_changed or (new.asr, new.source_language) != (old.asr, old.source_language):
             asyncio.create_task(services.pipeline.restart())
+        if new.remote != old.remote:
+            asyncio.create_task(services.tunnel.apply(new.remote))
         services.hub.to_listeners(services.languages_message())
         return admin_state()
 
@@ -386,6 +430,26 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             raise HTTPException(409, str(exc)) from exc
         return services.updater.status()
 
+    @app.post("/api/admin/tunnel/key")
+    async def tunnel_key(request: Request):
+        """Create this PC's key pair for the tunnel (once); returns the tunnel status with the public key."""
+        require_admin(request)
+        try:
+            await services.tunnel.create_key()
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        return services.tunnel.status()
+
+    @app.post("/api/admin/tunnel/forget")
+    async def tunnel_forget(request: Request):
+        """Forget the server's identity (after reinstalling it) and connect again."""
+        require_admin(request)
+        services.tunnel.forget_server()
+        remote = services.settings.remote
+        await services.tunnel.stop()
+        await services.tunnel.apply(remote)
+        return services.tunnel.status()
+
     @app.post("/api/admin/upload")
     async def upload(request: Request):
         """Store an audio file for rehearsals. Body is the raw file."""
@@ -464,5 +528,6 @@ async def _admin_ticker(services: Services) -> None:
                 "translator": translator_status(tr),
                 "vmix": services.vmix.status,
                 "update": services.updater.status(),
+                "tunnel": services.tunnel.status(),
             }
         )

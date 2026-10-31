@@ -6,6 +6,7 @@ import argparse
 import faulthandler
 import logging
 import os
+import socket
 import sys
 import threading
 import time
@@ -142,6 +143,20 @@ def main() -> None:
     )
     log.info("Live Translate is starting. Operator page: %s", admin_url)
 
+    # Phones on the network use the main port; the internet tunnel ends on a second port,
+    # only on this PC, where the operator page is refused (see TunnelGuard).
+    try:
+        sockets = [socket.create_server(("0.0.0.0", port))]
+    except OSError as exc:
+        log.error("Port %d is in use (%s); is another program using it?", port, exc)
+        return
+    tunnel_port = store.settings.remote.local_port
+    try:
+        sockets.append(socket.create_server(("127.0.0.1", tunnel_port)))
+    except OSError as exc:
+        log.warning("Tunnel port %d is in use (%s); listeners over the internet won't work", tunnel_port, exc)
+        app.state.services.tunnel.local_port = 0
+
     def open_browser_when_ready() -> None:
         for _ in range(100):
             if server.started:
@@ -162,10 +177,10 @@ def main() -> None:
 
     app.state.services.updater.request_exit = request_exit
     if tray is None:
-        server.run()
+        server.run(sockets=sockets)
         return
 
-    server_thread = threading.Thread(target=server.run, name="server")
+    server_thread = threading.Thread(target=server.run, kwargs={"sockets": sockets}, name="server")
     server_thread.start()
     try:
         tray.run()

@@ -73,6 +73,21 @@ class VmixSettings(BaseModel):
     auto_overlay: bool = True
 
 
+class RemoteSettings(BaseModel):
+    """Listeners over the internet, through an SSH tunnel to a server of your own (see tunnel.py)."""
+
+    enabled: bool = False
+    # The address phones open, served by that server (e.g. "https://vertaling.example.nl").
+    public_url: str = ""
+    ssh_host: str = ""
+    ssh_port: int = Field(22, ge=1, le=65535)
+    ssh_user: str = ""
+    # Port on the server's 127.0.0.1 that its web server passes requests to.
+    remote_port: int = Field(8800, ge=1024, le=65535)
+    # Port on this PC (127.0.0.1 only) where the tunnel ends; changes need a restart.
+    local_port: int = Field(8001, ge=1024, le=65535)
+
+
 class GlossaryEntry(BaseModel):
     """A word the speech recognition should know, optionally with fixed translations."""
 
@@ -122,6 +137,7 @@ class Settings(BaseModel):
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     glossary: list[GlossaryEntry] = Field(default_factory=default_glossary)
     vmix: VmixSettings = Field(default_factory=VmixSettings)
+    remote: RemoteSettings = Field(default_factory=RemoteSettings)
     audio: AudioSettings = Field(default_factory=AudioSettings)
     asr: AsrSettings = Field(default_factory=AsrSettings)
 

@@ -215,6 +215,58 @@
           </div>
         </div>
 
+        <h2 data-t="internet"></h2>
+        <p class="small muted" data-t="internetHelp"></p>
+        <label class="check"><input id="remoteEnabled" type="checkbox"> <span data-t="remoteEnabled"></span></label>
+        <div id="remoteRows">
+          <div class="row">
+            <label for="remoteUrl" data-t="remoteUrl"></label>
+            <input id="remoteUrl" type="text" inputmode="url" placeholder="https://vertaling.example.nl">
+          </div>
+          <div class="row pair">
+            <div>
+              <label for="remoteHost" data-t="remoteHost"></label>
+              <input id="remoteHost" type="text" placeholder="vps.example.nl">
+            </div>
+            <div>
+              <label for="remoteUser" data-t="remoteUser"></label>
+              <input id="remoteUser" type="text" placeholder="livetranslate">
+            </div>
+          </div>
+          <div class="row pair">
+            <div>
+              <label for="remoteSshPort" data-t="remoteSshPort"></label>
+              <input id="remoteSshPort" type="number" min="1" max="65535">
+            </div>
+            <div>
+              <label for="remotePort" data-t="remotePort"></label>
+              <input id="remotePort" type="number" min="1024" max="65535">
+            </div>
+          </div>
+          <p id="tunnelStatus" class="small"></p>
+          <details class="server-setup">
+            <summary data-t="serverSetup"></summary>
+            <ol class="small">
+              <li data-t="setupStep1"></li>
+              <li>
+                <span data-t="setupStep2"></span>
+                <pre id="setupNginx" class="code"></pre>
+                <button type="button" class="copy" data-copy="setupNginx" data-t="copy"></button>
+              </li>
+              <li>
+                <span data-t="setupStep3"></span>
+                <pre id="setupKey" class="code"></pre>
+                <button type="button" class="copy" data-copy="setupKey" data-t="copy"></button>
+                <button id="createKey" type="button" data-t="createKey" hidden></button>
+              </li>
+              <li data-t="setupStep4"></li>
+            </ol>
+            <div class="inline-buttons">
+              <button id="tunnelForget" type="button" data-t="tunnelForget"></button>
+            </div>
+          </details>
+        </div>
+
         <h2 data-t="updates"></h2>
         <label class="check"><input id="checkUpdates" type="checkbox"> <span data-t="checkUpdates"></span></label>
         <div class="inline-buttons">

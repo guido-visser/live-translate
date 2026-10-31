@@ -357,6 +357,89 @@
     } else e.target.value = "";
   });
 
+  // -- listeners over the internet (SSH tunnel to the church's own server) ---------------------
+
+  function remoteFromForm() {
+    return {
+      url: $("remoteUrl").value.trim().replace(/\/+$/, ""),
+      host: $("remoteHost").value.trim(),
+      user: $("remoteUser").value.trim(),
+      port: Number($("remotePort").value) || 8800,
+    };
+  }
+
+  function renderServerSetup() {
+    const r = remoteFromForm();
+    $("setupNginx").textContent = [
+      "location ~ ^/ {",
+      `    proxy_pass http://127.0.0.1:${r.port};`,
+      "    proxy_http_version 1.1;",
+      "    proxy_set_header Upgrade $http_upgrade;",
+      '    proxy_set_header Connection "upgrade";',
+      "    proxy_set_header Host $host;",
+      "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+      "    proxy_set_header X-Forwarded-Proto $scheme;",
+      "    proxy_buffering off;",
+      "    proxy_read_timeout 3600s;",
+      "    proxy_send_timeout 3600s;",
+      "}",
+    ].join("\n");
+    const key = state.tunnel.public_key;
+    // The key may only open this one tunnel: no shell, no other forwarding.
+    $("setupKey").textContent = key ? `restrict,port-forwarding,permitlisten="127.0.0.1:${r.port}" ${key}` : "";
+    $("setupKey").hidden = !key;
+    document.querySelector('[data-copy="setupKey"]').hidden = !key;
+    $("createKey").hidden = Boolean(key);
+  }
+
+  function renderTunnel() {
+    const tn = state.tunnel;
+    const el = $("tunnelStatus");
+    const url = state.settings.remote.public_url;
+    $("remoteRows").hidden = !$("remoteEnabled").checked;
+    el.className = "small";
+    if (tn.state === "connected") {
+      if (tn.reachable) el.textContent = `${t("tunnelConnected")} ${t("tunnelReachable").replace("{url}", url)}`;
+      else if (tn.reachable === false) {
+        el.textContent = `${t("tunnelConnected")} ${tn.reach_error}`;
+        el.className = "small warn-text";
+      } else el.textContent = url ? `${t("tunnelConnected")} ${t("tunnelChecking").replace("{url}", url)}` : t("tunnelConnected");
+    } else if (tn.state === "connecting") el.textContent = t("tunnelConnecting");
+    else if (tn.state === "error") {
+      el.textContent = `${t("tunnelError")}: ${tn.error}`;
+      el.className = "small error";
+    } else el.textContent = state.settings.remote.enabled ? "" : t("tunnelOff");
+    renderServerSetup();
+  }
+
+  $("remoteEnabled").addEventListener("change", renderTunnel);
+  for (const id of ["remoteUrl", "remoteHost", "remoteUser", "remotePort"]) $(id).addEventListener("input", renderServerSetup);
+
+  $("createKey").addEventListener("click", async () => {
+    $("createKey").disabled = true;
+    try {
+      state.tunnel = await api("/api/admin/tunnel/key", { method: "POST" });
+    } catch (err) {
+      $("tunnelStatus").textContent = err.message;
+    } finally {
+      $("createKey").disabled = false;
+      renderTunnel();
+    }
+  });
+
+  $("tunnelForget").addEventListener("click", async () => {
+    state.tunnel = await api("/api/admin/tunnel/forget", { method: "POST" });
+    renderTunnel();
+  });
+
+  for (const button of document.querySelectorAll("button.copy")) {
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText($(button.dataset.copy).textContent);
+      button.textContent = t("copied");
+      setTimeout(() => (button.textContent = t("copy")), 1500);
+    });
+  }
+
   // -- fill, collect, save -----------------------------------------------------------------
 
   function fill() {
@@ -397,6 +480,13 @@
     $("pin").value = s.admin_pin;
     $("port").value = s.port;
     $("checkUpdates").checked = s.check_updates;
+    $("remoteEnabled").checked = s.remote.enabled;
+    $("remoteUrl").value = s.remote.public_url;
+    $("remoteHost").value = s.remote.ssh_host;
+    $("remoteUser").value = s.remote.ssh_user;
+    $("remoteSshPort").value = s.remote.ssh_port;
+    $("remotePort").value = s.remote.remote_port;
+    renderTunnel();
     renderUpdate();
     renderKind();
     dirty = false;
@@ -434,6 +524,13 @@
     s.wifi_name = $("wifi").value.trim();
     s.admin_pin = $("pin").value.trim();
     s.check_updates = $("checkUpdates").checked;
+    const r = remoteFromForm();
+    s.remote.enabled = $("remoteEnabled").checked;
+    s.remote.public_url = r.url;
+    s.remote.ssh_host = r.host;
+    s.remote.ssh_user = r.user;
+    s.remote.ssh_port = Number($("remoteSshPort").value) || 22;
+    s.remote.remote_port = r.port;
     return s;
   }
 
@@ -502,6 +599,10 @@
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type !== "tick") return;
+      if (msg.tunnel && JSON.stringify(msg.tunnel) !== JSON.stringify(state.tunnel)) {
+        state.tunnel = msg.tunnel;
+        renderTunnel();
+      }
       const db = msg.level_db;
       $("meterFill").style.width = `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%`;
       $("meterFill").className = db > -3 ? "clip" : db > -12 ? "hot" : "";
@@ -517,6 +618,7 @@
     renderTargets();
     renderQuick();
     renderAddresses();
+    renderTunnel();
     renderVmixLanguages();
     renderGlossary();
     renderUpdate();

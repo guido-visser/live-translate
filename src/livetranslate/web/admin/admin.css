@@ -212,3 +212,12 @@ input[type=range] { width: 100%; }
 .audio-quick .row { margin-bottom: 10px; }
 .audio-quick .row.pair { margin-bottom: 0; }
 .file-name { margin: 0 0 10px; padding: 7px 10px; border: 1px dashed var(--border); border-radius: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-setup { margin-top: 8px; }
+.server-setup summary { cursor: pointer; font-weight: 600; }
+.server-setup ol { padding-left: 20px; }
+.server-setup li { margin-bottom: 12px; }
+.code {
+  font: 12px/1.45 ui-monospace, Consolas, monospace; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; margin: 6px 0; overflow-x: auto; white-space: pre;
+}
+#setupKey { white-space: pre-wrap; word-break: break-all; }

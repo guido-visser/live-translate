@@ -72,6 +72,12 @@ Speech recognition shares the GPU. Under **Settings → Audio** pick a smaller s
 | medium | ~1 GB | good |
 | small | ~0.5 GB | fair; OK on CPU |
 
+### Listening over the internet (5G)
+
+When the church Wi-Fi is unreliable, phones can also listen over their own mobile internet. Live Translate then keeps an SSH tunnel open from this PC to a server of your own (for example a VPS with Plesk), which serves a public HTTPS address and passes listeners through the tunnel. The church router needs no changes, and the operator page can never be reached this way: the tunnel ends on a separate port on this PC that only serves the listener page.
+
+Set it up under **Settings → Network → Listening over the internet**. Fill in the public address, the server, the SSH user and the port on the server. *Server setup* shows the nginx lines to paste into the subdomain's *Additional nginx directives* in Plesk, and this PC's key for `~/.ssh/authorized_keys`, limited to this one tunnel. The QR code then shows the public address, which works on the Wi-Fi as well. The PC needs a reliable internet connection during the service; each listener uses about 50 kbit/s of its upload. The tunnel reconnects by itself, and the settings page shows whether the public address actually reaches this PC.
+
 ## How it works
 
 * **Speech recognition**: [faster-whisper](https://github.com/SYSTRAN/faster-whisper). The audio is re-recognized every second; words two passes agree on are committed (LocalAgreement), and a sentence is released at punctuation or when the speaker pauses. Silero VAD skips silence and music. The typical delay is 1–3 s after the end of a sentence.
