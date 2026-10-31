@@ -14,10 +14,14 @@ from pathlib import Path
 import httpx
 
 from ..config import Settings
+from ..native import ACCESS_VIOLATION, runtime_hint
 
 log = logging.getLogger(__name__)
 
 PIVOT = "en"  # Argos models mostly go through English
+# Written once the environment is fully installed; an interrupted install leaves
+# libretranslate.exe behind without it, and is then installed again.
+INSTALLED_MARKER = ".livetranslate-installed"
 
 
 def _venv_exe(env: Path, name: str) -> Path:
@@ -30,6 +34,7 @@ class LibreTranslate:
     def __init__(self, settings: Settings, data_dir: Path):
         self.data_dir = data_dir
         self.env_dir = data_dir / "libretranslate-env"
+        self.log_path = data_dir / "libretranslate.log"
         self.status = "stopped"  # stopped|installing|starting|ready|error
         self.detail = ""
         self.languages: list[dict] = []
@@ -83,10 +88,17 @@ class LibreTranslate:
             "--disable-web-ui",
         ]
         log.info("Starting %s", " ".join(args))
-        log_file = open(self.data_dir / "libretranslate.log", "ab")
+        log_file = open(self.log_path, "ab")
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         # UTF-8 output: LibreTranslate prints "→" and crashes on a cp1252 console.
-        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "ARGOS_DEVICE_TYPE": "cpu"}
+        # PYTHONFAULTHANDLER: a crash in a native library still leaves a stack in the log.
+        env = {
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+            "PYTHONFAULTHANDLER": "1",
+            "ARGOS_DEVICE_TYPE": "cpu",
+        }
         self._proc = subprocess.Popen(args, stdout=log_file, stderr=subprocess.STDOUT, creationflags=flags, env=env)
         self._loaded = self.wanted
         await self._wait_ready(timeout=1800)
@@ -95,10 +107,14 @@ class LibreTranslate:
         # Always our own environment: a libretranslate found on PATH may belong to a
         # Python it doesn't run on (e.g. 3.14 breaks its spaCy/pydantic v1 imports).
         exe = _venv_exe(self.env_dir, "libretranslate")
-        if exe.exists():
+        marker = self.env_dir / INSTALLED_MARKER
+        if marker.exists() and exe.exists():
             return exe
         self.status, self.detail = "installing", "Installing LibreTranslate (one time, needs internet)…"
         log.info("Installing LibreTranslate into %s", self.env_dir)
+        if self.env_dir.exists():
+            # Left over from an install that didn't finish.
+            await asyncio.to_thread(shutil.rmtree, self.env_dir, ignore_errors=True)
         uv = os.environ.get("LIVETRANSLATE_UV") or shutil.which("uv")
         if uv:
             cmds = [
@@ -110,13 +126,19 @@ class LibreTranslate:
                 [sys.executable, "-m", "venv", str(self.env_dir)],
                 [str(_venv_exe(self.env_dir, "python")), "-m", "pip", "install", "libretranslate"],
             ]
-        for cmd in cmds:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-            )
-            out, _ = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(f"{' '.join(cmd[:3])} failed: {out.decode(errors='replace')[-500:]}")
+        install_log = self.data_dir / "libretranslate-install.log"
+        with open(install_log, "w", encoding="utf-8") as f:
+            for cmd in cmds:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+                )
+                out, _ = await proc.communicate()
+                text = out.decode(errors="replace")
+                f.write(f"> {' '.join(cmd)}\n{text}\n")
+                if proc.returncode != 0:
+                    await asyncio.to_thread(shutil.rmtree, self.env_dir, ignore_errors=True)
+                    raise RuntimeError(f"{' '.join(cmd[:3])} failed: {_first_error(text)} (full output in {install_log})")
+        marker.write_text("ok", "utf-8")
         return exe
 
     async def _ping(self) -> bool:
@@ -131,7 +153,7 @@ class LibreTranslate:
         deadline = loop.time() + timeout
         while loop.time() < deadline:
             if self._proc is not None and self._proc.poll() is not None:
-                raise RuntimeError(f"LibreTranslate exited (see {self.data_dir / 'libretranslate.log'})")
+                raise RuntimeError(self._exit_message(self._proc.returncode))
             if await self._ping():
                 await self._fetch_languages()
                 self.status, self.detail = "ready", ""
@@ -139,6 +161,17 @@ class LibreTranslate:
                 return
             await asyncio.sleep(1)
         raise TimeoutError("LibreTranslate did not become ready in time")
+
+    def _exit_message(self, code: int) -> str:
+        if code in ACCESS_VIOLATION:
+            message = "LibreTranslate crashed while loading (access violation)."
+            hint = runtime_hint()
+            if hint:
+                return f"{message} {hint}"
+        else:
+            message = f"LibreTranslate exited with code {code}."
+        tail = _tail(self.log_path)
+        return f"{message} Last output: {tail}" if tail else f"{message} See {self.log_path}"
 
     async def _fetch_languages(self) -> None:
         r = await self._client.get(f"{self.url}/languages")
@@ -194,3 +227,20 @@ class LibreTranslate:
         if len(self._cache) > 2000:
             self._cache.popitem(last=False)
         return result
+
+
+def _first_error(output: str) -> str:
+    """The line that says what went wrong (uv prints "error: …"), else the last line."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    for line in lines:
+        if line.lower().startswith(("error", "x ", "×")) or "error:" in line.lower():
+            return line[:300]
+    return lines[-1][:300] if lines else "no output"
+
+
+def _tail(path: Path, lines: int = 3) -> str:
+    try:
+        text = path.read_text("utf-8", errors="replace")
+    except OSError:
+        return ""
+    return " | ".join(line.strip() for line in text.strip().splitlines()[-lines:] if line.strip())[:400]

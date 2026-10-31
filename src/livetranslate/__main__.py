@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import logging
 import os
 import sys
@@ -14,6 +15,10 @@ from logging.handlers import RotatingFileHandler
 import httpx
 
 log = logging.getLogger("livetranslate")
+
+# Kept for the life of the process.
+_instance_mutex = None
+_crash_log = None
 
 
 def already_running(port: int) -> bool:
@@ -40,6 +45,40 @@ def ensure_streams() -> bool:
     return console
 
 
+def single_instance(port: int) -> bool:
+    """Claim this port for one app process (Windows); False when another one already has it.
+
+    Two starts at nearly the same time both pass already_running() and then race for the
+    port; the loser used to die with "address already in use"."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    handle = kernel32.CreateMutexW(None, False, f"Local\\LiveTranslate-{port}")
+    if handle and ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+        return False
+    global _instance_mutex
+    _instance_mutex = handle  # held until the process ends
+    return True
+
+
+def enable_crash_log(path) -> None:
+    """Native crashes (e.g. in a DLL) kill the process without a Python traceback; this
+    writes the Python stack of every thread to crash.log when that happens."""
+    try:
+        crash_log = open(path, "a", encoding="utf-8")
+        crash_log.write(f"\n== {time.strftime('%Y-%m-%d %H:%M:%S')} start, pid {os.getpid()}\n")
+        crash_log.flush()
+        faulthandler.enable(crash_log, all_threads=True)
+        global _crash_log
+        _crash_log = crash_log  # must stay open
+    except OSError:
+        log.warning("Could not open %s", path, exc_info=True)
+
+
 def main() -> None:
     console = ensure_streams()
 
@@ -64,6 +103,8 @@ def main() -> None:
         handlers=handlers,
     )
 
+    enable_crash_log(data / "crash.log")
+
     store = SettingsStore()
     if args.port:
         store.settings.port = args.port
@@ -73,7 +114,17 @@ def main() -> None:
 
     if already_running(port):
         log.info("Live Translate is already running; opening its page")
-        webbrowser.open(admin_url)
+        if not args.no_browser:
+            webbrowser.open(admin_url)
+        return
+    if not single_instance(port):
+        log.info("Live Translate is already starting; opening its page when it is ready")
+        for _ in range(150):
+            if already_running(port):
+                if not args.no_browser:
+                    webbrowser.open(admin_url)
+                break
+            time.sleep(0.2)
         return
 
     from .stt.cuda import setup_cuda_dll_paths

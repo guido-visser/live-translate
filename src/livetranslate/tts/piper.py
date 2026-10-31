@@ -17,6 +17,8 @@ import httpx
 import numpy as np
 import soxr
 
+from ..native import onnxruntime_failed, require_onnxruntime
+
 log = logging.getLogger(__name__)
 
 HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
@@ -87,12 +89,13 @@ class VoiceBank:
         self._lock = threading.Lock()
 
     def has_voice(self, lang: str) -> bool:
-        return lang in VOICES and lang not in self._failed
+        return lang in VOICES and lang not in self._failed and not onnxruntime_failed()
 
     def _voice(self, lang: str):
         with self._lock:
             if lang in self._voices:
                 return self._voices[lang]
+            require_onnxruntime()  # Piper runs on onnxruntime, which can crash the app on import
             from piper import PiperVoice
 
             name = VOICES[lang]

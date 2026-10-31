@@ -16,6 +16,13 @@ if (-not (Test-Path (Join-Path $bin "uv.exe"))) {
     Expand-Archive $zip -DestinationPath $bin -Force
 }
 
+# Microsoft Visual C++ runtime; Setup runs it when the PC's copy is older than 14.40.
+$vcRedist = Join-Path $bin "vc_redist.x64.exe"
+if (-not (Test-Path $vcRedist)) {
+    Write-Host "Downloading the Visual C++ runtime"
+    Invoke-WebRequest "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile $vcRedist
+}
+
 # From here on, failures are checked via $LASTEXITCODE: under "Stop", Windows PowerShell 5.1
 # turns any stderr output of a native program (uv logs progress there) into an error.
 $ErrorActionPreference = "Continue"

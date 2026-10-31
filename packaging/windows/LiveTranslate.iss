@@ -44,12 +44,15 @@ Source: "bin\uv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "LiveTranslate.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LiveTranslate.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LiveTranslate.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "bin\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: VcRuntimeOutdated
 
 [Icons]
 Name: "{group}\Live Translate"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\LiveTranslate.ico"
 Name: "{autodesktop}\Live Translate"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\LiveTranslate.ico"; Tasks: desktopicon
 
 [Run]
+; onnxruntime and sentencepiece crash on import with a Visual C++ runtime older than 14.40.
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Flags: waituntilterminated; Check: VcRuntimeOutdated
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Live Translate"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Live Translate"" dir=in action=allow protocol=TCP localport=8000 profile=any"; Flags: runhidden
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Description: "{cm:LaunchProgram,Live Translate}"; Flags: postinstall nowait skipifsilent runasoriginaluser
@@ -71,6 +74,17 @@ begin
   if ActiveLanguage = 'dutch' then Result := 'nl'
   else if ActiveLanguage = 'russian' then Result := 'ru'
   else if ActiveLanguage = 'ukrainian' then Result := 'uk';
+end;
+
+// True when msvcp140.dll in System32 is missing or older than 14.40.
+function VcRuntimeOutdated: Boolean;
+var
+  MS, LS: Cardinal;
+begin
+  if GetVersionNumbers(ExpandConstant('{sys}\msvcp140.dll'), MS, LS) then
+    Result := ((MS shr 16) < 14) or (((MS shr 16) = 14) and ((MS and $FFFF) < 40))
+  else
+    Result := True;
 end;
 
 // Set by the app's updater: /relaunch=1 /waitpid=<pid of the running app>.

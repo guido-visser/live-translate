@@ -250,6 +250,9 @@ class WhisperEngine:
     """Loads a faster-whisper model and exposes the two functions the transcriber needs."""
 
     def __init__(self, settings: AsrSettings, language: str, download_root: str):
+        from ..native import require_onnxruntime
+
+        require_onnxruntime()  # its voice detection would otherwise crash the app on import
         from faster_whisper import WhisperModel
 
         from .cuda import cuda_available, setup_cuda_dll_paths

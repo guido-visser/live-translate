@@ -17,6 +17,7 @@ from ..audio.devices import list_all
 from ..config import Settings, SettingsStore, data_dir as default_data_dir
 from ..integrations.vmix import VmixOutput
 from ..languages import RTL, native_name, ui_language
+from ..native import onnxruntime_error
 from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
@@ -82,6 +83,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         services.pipeline.ensure_worker()
         tasks = [asyncio.create_task(_admin_ticker(services))]
         if manage_translator:
+            tasks.append(asyncio.create_task(_check_native(services)))
             tasks.append(asyncio.create_task(_start_translator(services)))
             tasks.append(asyncio.create_task(services.updater.run_checks(lambda: services.settings.check_updates)))
         yield
@@ -421,6 +423,15 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
 
 def translator_status(tr: TranslationService) -> dict:
     return {"engine": tr.engine, "status": tr.status, "detail": tr.detail, "needs_restart": tr.needs_restart}
+
+
+async def _check_native(services: Services) -> None:
+    """Find out early whether onnxruntime loads, so the operator page explains a broken PC."""
+    error = await asyncio.to_thread(onnxruntime_error)
+    if error and services.pipeline.state == "stopped" and not services.pipeline.error:
+        services.pipeline.error = error
+        services.hub.to_admins({"type": "status", **services.pipeline.status()})
+        services.hub.to_listeners(services.languages_message())  # spoken translations are gone
 
 
 async def _start_translator(services: Services) -> None:
