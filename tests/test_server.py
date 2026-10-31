@@ -274,3 +274,11 @@ def test_update_status_and_no_install_without_an_update(client):
     state = client.get("/api/admin/state").json()
     assert state["update"]["current"] and state["update"]["available"] is False
     assert client.post("/api/admin/update/install").status_code == 409
+
+
+def test_static_files_are_checked_before_reuse(client):
+    # After an update the browser must not keep old scripts next to new pages.
+    r = client.get("/static/admin/i18n.js")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    again = client.get("/static/admin/i18n.js", headers={"If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304

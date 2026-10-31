@@ -37,6 +37,16 @@ TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/api/public", "/ws/listen", "/sta
 TUNNEL_PREFIXES = ("/static/client/", "/audio/")
 
 
+class FreshStaticFiles(StaticFiles):
+    """Static files the browser checks before reuse, so an update never mixes new pages
+    with old scripts (unchanged files still come from the cache, via their ETag)."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 class TunnelGuard:
     """Requests that arrive through the tunnel port only get the listener pages.
 
@@ -135,7 +145,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     app = FastAPI(title="Live Translate", lifespan=lifespan)
     app.state.services = services
     app.add_middleware(TunnelGuard, tunnel=services.tunnel)
-    app.mount("/static", StaticFiles(directory=WEB), name="static")
+    app.mount("/static", FreshStaticFiles(directory=WEB), name="static")
 
     def require_admin(request: Request | WebSocket) -> None:
         host = request.client.host if request.client else ""
