@@ -23,6 +23,8 @@ Everything runs on one Windows, macOS or Linux computer. An NVIDIA GPU is recomm
 
 The installer adds a Windows Firewall rule for TCP port 8000 so phones can connect.
 
+**Updates.** When the PC has internet, Live Translate looks for a new version on the [Releases](../../releases) page shortly after it starts and every 6 hours after that. When there is one, the operator page shows a bar with **Update now**. Nothing installs by itself, and updating is only possible while translation is stopped. Windows asks for permission, Live Translate closes, the new version installs, and the app starts again. The first start after an update shows a console window for a minute while it updates its environment. Turn the check off or check by hand under **Settings → Network → Updates**. To publish an update, raise `version` in `pyproject.toml` and push a `v<version>` tag: the workflow builds the installer and attaches it to the release.
+
 ### From source (Windows, macOS, Linux)
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run `start.cmd` (Windows) or `./start.sh` (macOS/Linux).

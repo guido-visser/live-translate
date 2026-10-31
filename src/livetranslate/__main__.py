@@ -102,6 +102,14 @@ def main() -> None:
         threading.Thread(target=open_browser_when_ready, daemon=True).start()
 
     tray = None if args.no_tray else _make_tray(app, server, port)
+
+    def request_exit() -> None:
+        """Close the whole app (used when an update's installer takes over)."""
+        server.should_exit = True
+        if tray is not None:
+            tray.stop()
+
+    app.state.services.updater.request_exit = request_exit
     if tray is None:
         server.run()
         return

@@ -396,6 +396,8 @@
     $("wifi").value = s.wifi_name;
     $("pin").value = s.admin_pin;
     $("port").value = s.port;
+    $("checkUpdates").checked = s.check_updates;
+    renderUpdate();
     renderKind();
     dirty = false;
   }
@@ -431,8 +433,41 @@
     s.public_host = $("address").value === "__custom" ? "" : $("address").value;
     s.wifi_name = $("wifi").value.trim();
     s.admin_pin = $("pin").value.trim();
+    s.check_updates = $("checkUpdates").checked;
     return s;
   }
+
+  // -- updates (installing happens on the main screen) -------------------------------------
+
+  function renderUpdate() {
+    const u = state.update;
+    $("version").textContent = u.current;
+    const el = $("updateStatus");
+    el.textContent = "";
+    if (u.state === "checking") el.textContent = "…";
+    else if (u.available) {
+      el.textContent = `${t("updateAvailable").replace("{v}", u.latest)} `;
+      const a = document.createElement("a");
+      a.href = u.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = t("updateWhatsNew");
+      el.appendChild(a);
+    } else if (u.state === "error") el.textContent = t("checkFailed");
+    else if (u.latest) el.textContent = t("upToDate");
+  }
+
+  $("checkNow").addEventListener("click", async () => {
+    $("checkNow").disabled = true;
+    state.update = { ...state.update, state: "checking" };
+    renderUpdate();
+    try {
+      state.update = await api("/api/admin/update/check", { method: "POST" });
+    } finally {
+      $("checkNow").disabled = false;
+      renderUpdate();
+    }
+  });
 
   function markDirty() {
     dirty = true;
@@ -484,6 +519,7 @@
     renderAddresses();
     renderVmixLanguages();
     renderGlossary();
+    renderUpdate();
   });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));

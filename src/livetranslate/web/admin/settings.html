@@ -214,6 +214,14 @@
             <input id="port" type="text" readonly>
           </div>
         </div>
+
+        <h2 data-t="updates"></h2>
+        <label class="check"><input id="checkUpdates" type="checkbox"> <span data-t="checkUpdates"></span></label>
+        <div class="inline-buttons">
+          <span><span data-t="versionInstalled"></span>: <span id="version" class="mono"></span></span>
+          <button id="checkNow" type="button" data-t="checkNow"></button>
+        </div>
+        <p id="updateStatus" class="small muted"></p>
       </section>
 
       <div class="save-bar">

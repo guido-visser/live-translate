@@ -117,6 +117,8 @@ class Settings(BaseModel):
     # When set, use this LibreTranslate instead of starting one ourselves.
     libretranslate_url: str = ""
     libretranslate_port: int = 5001
+    # Look for a new version on GitHub now and then (installing is always the operator's choice).
+    check_updates: bool = True
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     glossary: list[GlossaryEntry] = Field(default_factory=default_glossary)
     vmix: VmixSettings = Field(default_factory=VmixSettings)

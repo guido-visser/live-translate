@@ -42,3 +42,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: packaging/windows/Output/*.exe
+          # Shown behind "What's new" when the app offers the update.
+          generate_release_notes: true

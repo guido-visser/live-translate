@@ -226,6 +226,41 @@
   $("qGain").addEventListener("change", saveAudio);
   $("qRefresh").addEventListener("click", loadDevices);
 
+  // -- updates -----------------------------------------------------------------------
+
+  let update = null;
+
+  function renderUpdate(u) {
+    if (u) update = u;
+    const bar = $("updateBar");
+    const busy = update && ["downloading", "installing"].includes(update.state);
+    bar.hidden = !update || !(update.available || busy);
+    if (bar.hidden) return;
+    $("updateText").textContent = t("updateAvailable").replace("{v}", update.latest);
+    $("updateLink").href = update.url || "#";
+    $("updateLink").textContent = update.can_install ? t("updateWhatsNew") : t("updateDownload");
+    const btn = $("updateBtn");
+    btn.hidden = !update.can_install;
+    // Never during a service: the app closes while the installer runs.
+    btn.disabled = busy || status.state !== "stopped";
+    let note = "";
+    if (update.state === "downloading") note = `${t("updateDownloading")} ${Math.round(update.progress * 100)}%`;
+    else if (update.state === "installing") note = t("updateInstalling");
+    else if (update.state === "error" && update.error) note = `${t("updateFailed")}: ${update.error}`;
+    else if (update.can_install && status.state !== "stopped") note = t("updateStopFirst");
+    $("updateNote").textContent = note;
+  }
+
+  $("updateBtn").addEventListener("click", async () => {
+    if (!confirm(t("updateConfirm").replace("{v}", update.latest))) return;
+    $("updateBtn").disabled = true;
+    try {
+      renderUpdate(await api("/api/admin/update/install", { method: "POST" }));
+    } catch (err) {
+      renderUpdate({ ...update, state: "error", error: err.message });
+    }
+  });
+
   // -- performance toggle -------------------------------------------------------------
 
   function showPerformance(on) {
@@ -317,6 +352,7 @@
     renderStatus();
     renderVmix(state.vmix);
     renderAudio();
+    renderUpdate(state.update);
     $("transcript").textContent = "";
     for (const seg of state.history) addTranscript(seg.text, seg.lang);
   }
@@ -335,6 +371,7 @@
         translator = msg.translator;
         renderStatus();
         renderVmix(msg.vmix);
+        renderUpdate(msg.update);
         const key = `${translator.engine}:${translator.status}`;
         if (key !== lastTranslatorKey) {
           // Language names become known once the translator is ready.
@@ -357,7 +394,7 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadState(); });
 
   let lastCounts = [{}, {}];
-  window.LT.onLanguageChange(() => { renderStatus(); renderVmix(); renderListeners(...lastCounts); renderAudio(); });
+  window.LT.onLanguageChange(() => { renderStatus(); renderVmix(); renderListeners(...lastCounts); renderAudio(); renderUpdate(); });
   window.LT.applyTexts();
   renderListeners();
   loadState();

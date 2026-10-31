@@ -268,3 +268,9 @@ def test_glossary_is_saved_and_used_right_away(client):
         "ru": {"text": "[ru] Dominee Янсен bidt.", "back": "[en] [ru] Dominee Янсен bidt."},
         "uk": {"text": "[uk] Dominee Jansen bidt.", "back": "[en] [uk] Dominee Jansen bidt."},
     }
+
+
+def test_update_status_and_no_install_without_an_update(client):
+    state = client.get("/api/admin/state").json()
+    assert state["update"]["current"] and state["update"]["available"] is False
+    assert client.post("/api/admin/update/install").status_code == 409

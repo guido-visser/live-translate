@@ -60,6 +60,14 @@ h2 { font-size: 13px; margin: 0 0 12px; text-transform: uppercase; letter-spacin
 .icon-btn:hover { border-color: var(--accent); }
 #uiLang { width: auto; padding: 6px 8px; }
 
+.update-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--accent);
+}
+.update-bar #updateText { font-weight: 600; }
+.update-bar #updateNote { color: var(--muted); }
+.update-bar button { margin-left: auto; }
+
 /* -- layout ------------------------------------------------------------------- */
 .grid {
   display: grid; gap: 16px; padding: 16px;

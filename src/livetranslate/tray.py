@@ -145,12 +145,16 @@ class Tray:
 
     def _exit(self, icon=None, item=None) -> None:
         log.info("Exit chosen from the tray")
-        self._stop.set()
         try:
             self.on_exit()
         finally:
-            if self.icon is not None:
-                self.icon.stop()
+            self.stop()
+
+    def stop(self) -> None:
+        """Remove the icon; run() then returns."""
+        self._stop.set()
+        if self.icon is not None:
+            self.icon.stop()
 
     def _refresh(self) -> None:
         """Keep the icon colour, tooltip and status line in step with the app."""

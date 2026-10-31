@@ -21,6 +21,7 @@ from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
+from ..updater import Updater
 from .hub import Connection, Hub
 from .network import GpuStats, lan_addresses, listener_url, qr_svg
 
@@ -42,6 +43,7 @@ class Services:
         self.vmix = VmixOutput(lambda: store.settings)
         self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data, self.vmix)
         self.gpu = GpuStats()
+        self.updater = Updater(data, lambda: self.pipeline.state == "stopped")
 
     @property
     def settings(self) -> Settings:
@@ -81,6 +83,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         tasks = [asyncio.create_task(_admin_ticker(services))]
         if manage_translator:
             tasks.append(asyncio.create_task(_start_translator(services)))
+            tasks.append(asyncio.create_task(services.updater.run_checks(lambda: services.settings.check_updates)))
         yield
         for task in tasks:
             task.cancel()
@@ -227,6 +230,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             ],
             "vmix": services.vmix.status,
             "translator": translator_status(tr),
+            "update": services.updater.status(),
             "source_languages": sources,
             "target_languages": sorted(targets, key=lambda l: l["name"].lower()),
             "tts_languages": sorted(l for l in services.speech.bank_languages()),
@@ -365,6 +369,21 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         asyncio.create_task(services.translator.restart())
         return {"ok": True}
 
+    @app.post("/api/admin/update/check")
+    async def check_update(request: Request):
+        require_admin(request)
+        return await services.updater.check()
+
+    @app.post("/api/admin/update/install")
+    async def install_update(request: Request):
+        """Download and start the new installer; the app then closes and Setup starts it again."""
+        require_admin(request)
+        try:
+            await services.updater.install()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return services.updater.status()
+
     @app.post("/api/admin/upload")
     async def upload(request: Request):
         """Store an audio file for rehearsals. Body is the raw file."""
@@ -433,5 +452,6 @@ async def _admin_ticker(services: Services) -> None:
                 "gpu": gpu,
                 "translator": translator_status(tr),
                 "vmix": services.vmix.status,
+                "update": services.updater.status(),
             }
         )
