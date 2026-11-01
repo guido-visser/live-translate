@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -13,12 +14,14 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import autostart, calibration
 from ..audio.devices import list_all
-from ..config import Settings, SettingsStore, data_dir as default_data_dir
+from ..config import PROFILE_FIELDS, Settings, SettingsStore, data_dir as default_data_dir
 from ..integrations.vmix import VmixOutput
 from ..languages import RTL, native_name, ui_language
 from ..native import onnxruntime_error
 from ..pipeline import WHISPER_LANGUAGES, Pipeline
+from ..stt.sound import SONG_LEVELS
 from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
 from ..tts.piper import SpeechService
@@ -133,6 +136,8 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             tasks.append(asyncio.create_task(_check_native(services)))
             tasks.append(asyncio.create_task(_start_translator(services)))
             tasks.append(asyncio.create_task(services.updater.run_checks(lambda: services.settings.check_updates)))
+            if services.settings.auto_start_translation:
+                tasks.append(asyncio.create_task(_auto_start(services)))
             await services.tunnel.apply(services.settings.remote)
         yield
         for task in tasks:
@@ -284,6 +289,9 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             "translator": translator_status(tr),
             "update": services.updater.status(),
             "tunnel": services.tunnel.status(),
+            "windows": autostart.supported(),
+            "logs_folder": str(services.pipeline.logs_dir),
+            "profile_fields": PROFILE_FIELDS,
             "source_languages": sources,
             "target_languages": sorted(targets, key=lambda l: l["name"].lower()),
             "tts_languages": sorted(l for l in services.speech.bank_languages()),
@@ -313,6 +321,10 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         new.port = old.port  # the port only changes on restart (it is in the QR code)
         new.remote.local_port = old.remote.local_port  # bound at start
         services.store.save(new)
+        if new.start_with_windows != old.start_with_windows:
+            autostart.apply(new.start_with_windows)
+        if new.gpu_helpers != old.gpu_helpers:
+            services.speech.bank.set_gpu(new.gpu_helpers)
         services.speech.enabled = new.tts_enabled
         if new.glossary != old.glossary:
             services.translator.glossary = Glossary(new.glossary)
@@ -331,7 +343,8 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         # Gain applies live; any other audio change reopens the input.
         services.pipeline.set_gain(new.audio.gain)
         audio_changed = new.audio.model_copy(update={"gain": old.audio.gain}) != old.audio
-        if audio_changed or (new.asr, new.source_language) != (old.asr, old.source_language):
+        restart_on = (new.asr, new.source_language, new.gpu_helpers, new.service_log)
+        if audio_changed or restart_on != (old.asr, old.source_language, old.gpu_helpers, old.service_log):
             asyncio.create_task(services.pipeline.restart())
         if new.remote != old.remote:
             asyncio.create_task(services.tunnel.apply(new.remote))
@@ -356,6 +369,89 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         body = await request.json()
         services.pipeline.set_paused(bool(body.get("paused")))
         return {"paused": services.pipeline.paused}
+
+    @app.get("/api/admin/profile")
+    async def church_profile(request: Request):
+        """This church's name, languages and glossary as a file, to move or share."""
+        require_admin(request)
+        data = services.settings.model_dump(include=set(PROFILE_FIELDS))
+        return Response(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="live-translate-church.json"'},
+        )
+
+    @app.post("/api/admin/singing")
+    async def set_skip_singing(request: Request):
+        """The operator's switch: skip songs automatically, or translate everything."""
+        require_admin(request)
+        on = bool((await request.json()).get("on"))
+        services.store.save(services.settings.model_copy(update={"skip_singing": on}))
+        return services.pipeline.status()
+
+    @app.post("/api/admin/singing/level")
+    async def set_song_level(request: Request):
+        """The calibration slider; the recognition thread picks this up at its next pass."""
+        require_admin(request)
+        level = (await request.json()).get("level")
+        if level not in SONG_LEVELS:
+            raise HTTPException(400, "Unknown level")
+        services.store.save(services.settings.model_copy(update={"song_level": level}))
+        return {"level": level}
+
+    def running_log() -> Path | None:
+        current = services.pipeline.service_log
+        return current.folder if current else None
+
+    def finished_log(name: str) -> Path:
+        root = services.pipeline.logs_dir
+        folder = root / name
+        if folder.parent != root or folder == running_log() or not (folder / "events.jsonl").is_file():
+            raise HTTPException(404, "No such service")
+        return folder
+
+    @app.get("/api/admin/logs")
+    async def list_logs(request: Request):
+        require_admin(request)
+        root, running = services.pipeline.logs_dir, running_log()
+        return await asyncio.to_thread(calibration.list_services, root, running)
+
+    @app.get("/api/admin/logs/{name}/analysis")
+    async def analyse_log(name: str, request: Request):
+        require_admin(request)
+        return await asyncio.to_thread(calibration.analyse, finished_log(name))
+
+    @app.post("/api/admin/logs/{name}/fit")
+    async def fit_log(name: str, request: Request):
+        """The slider level that suits the stretches the operator labelled as music or speech."""
+        require_admin(request)
+        folder, labels = finished_log(name), (await request.json())["labels"]
+        analysis = await asyncio.to_thread(calibration.analyse, folder)
+        return {"level": calibration.best_level(analysis, labels)}
+
+    @app.get("/api/admin/logs/{name}/clip")
+    async def log_clip(name: str, t: float, request: Request):
+        require_admin(request)
+        folder = finished_log(name)
+        if not (folder / "audio.flac").is_file():
+            raise HTTPException(404, "This service has no recording")
+        return Response(await asyncio.to_thread(calibration.audio_clip, folder, t), media_type="audio/wav")
+
+    @app.post("/api/admin/mark")
+    async def mark(request: Request):
+        """Note this moment in the service log ("this went wrong")."""
+        require_admin(request)
+        services.pipeline.mark()
+        return {"ok": True}
+
+    @app.post("/api/admin/logs/open")
+    async def open_logs(request: Request):
+        require_admin(request)
+        folder = services.pipeline.logs_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        if hasattr(os, "startfile"):
+            os.startfile(folder)
+        return {"folder": str(folder)}
 
     @app.post("/api/admin/speaker")
     async def set_speaker(request: Request):
@@ -506,6 +602,16 @@ async def _check_native(services: Services) -> None:
         services.pipeline.error = error
         services.hub.to_admins({"type": "status", **services.pipeline.status()})
         services.hub.to_listeners(services.languages_message())  # spoken translations are gone
+
+
+async def _auto_start(services: Services, tries: int = 30, wait_s: float = 10) -> None:
+    """Start translating by itself. Right after boot a USB audio interface may not be there yet."""
+    for attempt in range(tries):
+        await services.pipeline.start()
+        if services.pipeline.state != "stopped":
+            return
+        log.info("Automatic start failed (%d of %d): %s", attempt + 1, tries, services.pipeline.error)
+        await asyncio.sleep(wait_s)
 
 
 async def _start_translator(services: Services) -> None:

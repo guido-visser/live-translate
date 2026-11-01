@@ -25,12 +25,12 @@ def test_inline_puts_the_translation_in_the_sentence():
 def test_placeholders_and_restore():
     glossary = Glossary(ENTRIES)
     text, terms = glossary.prepare("Na het Heilig Avondmaal bidt Jansen.", "nl", "ru", inline=False)
-    assert text == "Na het {1} bidt {2}."
+    assert text == "Na het [1] bidt [2]."
     assert terms == ["Вечеря Господня", "Янсен"]
     # Engines change the brackets now and then; any of them is put back.
-    assert Glossary.restore("После [1] молится {2}.", terms) == "После Вечеря Господня молится Янсен."
-    assert Glossary.restore("После ужина молится {2}.", terms) is None
-    assert Glossary.restore("After the {1} we sing.", ["the Lord's Supper"]) == "After the Lord's Supper we sing."
+    assert Glossary.restore("После {1} молится [2].", terms) == "После Вечеря Господня молится Янсен."
+    assert Glossary.restore("После ужина молится [2].", terms) is None
+    assert Glossary.restore("After the [1] we sing.", ["the Lord's Supper"]) == "After the Lord's Supper we sing."
 
 
 def test_matching_rules():
@@ -57,8 +57,36 @@ def test_english_word_steers_languages_without_their_own_translation():
     assert glossary.prepare("De diaken bidt.", "nl", "ru", inline=False) == ("De deacon bidt.", [])
     assert glossary.prepare("De diaken bidt.", "nl", "ru", inline=True) == ("De deacon bidt.", [])
     # A language's own translation wins over the English word.
-    assert glossary.prepare("De diaken bidt.", "nl", "uk", inline=False) == ("De {1} bidt.", ["диякон"])
-    assert glossary.prepare("De diaken bidt.", "nl", "en", inline=False) == ("De {1} bidt.", ["deacon"])
+    assert glossary.prepare("De diaken bidt.", "nl", "uk", inline=False) == ("De [1] bidt.", ["диякон"])
+    assert glossary.prepare("De diaken bidt.", "nl", "en", inline=False) == ("De [1] bidt.", ["deacon"])
+
+
+def test_a_name_is_never_translated():
+    # The English word is the spoken word: that's how the operator says "leave this alone".
+    glossary = Glossary(
+        [
+            GlossaryEntry(term="De Kandelaar, Kandelaar", translations={"en": "De Kandelaar", "ru": "Де Канделаар"}),
+            GlossaryEntry(term="Jansen", translations={"en": "Jansen"}),
+        ]
+    )
+    sentence = "Kandelaar en Jansen."
+    # Without this the unchanged word reached the engine, which said "Candlestick".
+    assert glossary.prepare(sentence, "nl", "uk", inline=True) == ("[1] en [2].", ["Kandelaar", "Jansen"])
+    assert glossary.prepare(sentence, "nl", "uk", inline=False) == ("[1] en [2].", ["Kandelaar", "Jansen"])
+    # A word filled in for the language wins, and is put back exactly, also with NLLB.
+    assert glossary.prepare("In De Kandelaar.", "nl", "ru", inline=True) == ("In [1].", ["Де Канделаар"])
+    assert glossary.prepare("In De Kandelaar.", "nl", "en", inline=True) == ("In [1].", ["De Kandelaar"])
+
+
+def test_restore_separates_a_glued_placeholder():
+    assert Glossary.restore("Мы в Де[1].", ["Канделаар"]) == "Мы в Де Канделаар."
+
+
+async def test_nllb_gets_a_placeholder_for_a_name():
+    service = make_service("nllb", lambda text: text.replace("Welkom bij", "Welcome to"))
+    service.glossary = Glossary([GlossaryEntry(term="Kandelaar", translations={"en": "Kandelaar"})])
+    assert await service.translate("Welkom bij Kandelaar.", "nl", "en") == "Welcome to Kandelaar."
+    assert service.calls == ["Welkom bij [1]."]
 
 
 def test_hotwords_per_spoken_language_in_list_order():
@@ -98,11 +126,11 @@ async def test_nllb_gets_the_word_in_the_sentence():
 async def test_libretranslate_restores_placeholders_or_falls_back():
     service = make_service("libretranslate", lambda text: text.replace("Welkom in de", "Добро пожаловать в"))
     assert await service.translate("Welkom in de gemeente.", "nl", "ru") == "Добро пожаловать в церковь."
-    assert service.calls == ["Welkom in de {1}."]
+    assert service.calls == ["Welkom in de [1]."]
 
     lossy = make_service("libretranslate", lambda text: "Добро пожаловать.")
     assert await lossy.translate("Welkom in de gemeente.", "nl", "ru") == "Добро пожаловать."
-    assert lossy.calls == ["Welkom in de {1}.", "Welkom in de gemeente."]
+    assert lossy.calls == ["Welkom in de [1].", "Welkom in de gemeente."]
 
 
 @pytest.mark.skipif(

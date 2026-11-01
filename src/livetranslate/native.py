@@ -26,6 +26,7 @@ ACCESS_VIOLATION = (-1073741819, 3221225477)
 
 _lock = threading.Lock()
 _onnx_error: str | None = None  # None: not checked yet; "": works
+_directml: bool | None = None  # None: not checked yet
 
 
 def vc_runtime_version() -> tuple[int, ...] | None:
@@ -115,6 +116,49 @@ def onnxruntime_error() -> str:
             if _onnx_error:
                 log.error("%s Speech recognition and spoken translations are disabled.", _onnx_error)
         return _onnx_error
+
+
+def _directml_works() -> bool:
+    """Checks once, in a separate process: a driver problem must not take the app down."""
+    global _directml
+    with _lock:
+        if _directml is None:
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            model = Path(__file__).parent / "stt" / "yamnet.onnx"
+            code = (
+                "import numpy, onnxruntime as o; "
+                f"s = o.InferenceSession({str(model)!r}, providers=['DmlExecutionProvider']); "
+                "s.run(None, {'waveform': numpy.zeros(16000, dtype=numpy.float32)})"
+            )
+            try:
+                proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=60, creationflags=flags)
+                _directml = proc.returncode == 0
+            except Exception:
+                log.warning("Could not check DirectML", exc_info=True)
+                _directml = False
+            log.info("GPU through DirectML: %s", "available" if _directml else "not available, using the CPU")
+        return _directml
+
+
+def onnx_session(path: Path, gpu: bool = True, cpu_threads: int = 2):
+    """An onnxruntime session on the GPU when possible.
+
+    On the CPU it stays on a few threads that don't spin: the default takes every core for a
+    moment, which is what makes a livestream on the same PC stutter.
+    """
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    providers = ["CPUExecutionProvider"]
+    if gpu and "DmlExecutionProvider" in ort.get_available_providers() and _directml_works():
+        # What DirectML requires.
+        options.enable_mem_pattern = False
+        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        providers.insert(0, "DmlExecutionProvider")
+    else:
+        options.intra_op_num_threads = cpu_threads
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    return ort.InferenceSession(str(path), sess_options=options, providers=providers)
 
 
 def onnxruntime_failed() -> bool:

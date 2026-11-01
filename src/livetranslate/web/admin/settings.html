@@ -23,15 +23,83 @@
 
   <main class="settings-main">
     <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="church" data-t="tabChurch"></button>
       <button type="button" role="tab" data-tab="audio" data-t="tabAudio"></button>
       <button type="button" role="tab" data-tab="languages" data-t="tabLanguages"></button>
       <button type="button" role="tab" data-tab="quick" data-t="tabQuick"></button>
       <button type="button" role="tab" data-tab="glossary" data-t="tabGlossary"></button>
       <button type="button" role="tab" data-tab="vmix" data-t="tabVmix"></button>
       <button type="button" role="tab" data-tab="network" data-t="tabNetwork"></button>
+      <button type="button" role="tab" data-tab="startup" data-t="tabStartup"></button>
+      <button type="button" role="tab" data-tab="log" data-t="tabLog"></button>
     </nav>
 
     <form id="settingsForm" class="card tab-panels" autocomplete="off">
+      <!-- Church -->
+      <section class="tab-panel" data-panel="church" role="tabpanel">
+        <h2 data-t="tabChurch"></h2>
+        <p class="muted small" data-t="churchHelp"></p>
+        <div class="row pair">
+          <div>
+            <label for="churchName" data-t="churchName"></label>
+            <input id="churchName" type="text" placeholder="Evangeliegemeente De Kandelaar">
+          </div>
+          <div>
+            <label for="churchShort" data-t="churchShort"></label>
+            <input id="churchShort" type="text" placeholder="De Kandelaar">
+          </div>
+        </div>
+        <div class="inline-buttons">
+          <button id="churchProtect" type="button" data-t="churchProtect"></button>
+        </div>
+        <h2 data-t="profile"></h2>
+        <p class="muted small" data-t="profileHelp"></p>
+        <div class="inline-buttons">
+          <a id="profileExport" class="button-like" href="/api/admin/profile" download data-t="profileExport"></a>
+          <label class="button-like"><input id="profileImport" type="file" accept=".json,application/json" hidden><span data-t="profileImport"></span></label>
+          <span id="profileStatus" class="small"></span>
+        </div>
+        <details id="calibration" class="server-setup">
+          <summary data-t="calTitle"></summary>
+          <p class="muted small" data-t="calHelp"></p>
+          <p id="calEmpty" class="small" data-t="calEmpty" hidden></p>
+          <div id="calBody" hidden>
+            <div class="row">
+              <label for="calService" data-t="calService"></label>
+              <select id="calService"></select>
+            </div>
+            <div id="calTimeline" class="cal-timeline"></div>
+            <div id="calAxis" class="cal-axis small muted mono"></div>
+            <div id="calPicked" class="cal-picked" hidden>
+              <strong id="calPickedText"></strong>
+              <div class="inline-buttons cal-actions">
+                <button id="calListen" type="button" data-t="calListen"></button>
+                <button id="calIsMusic" type="button" data-t="calIsMusic"></button>
+                <button id="calIsSpeech" type="button" data-t="calIsSpeech"></button>
+              </div>
+              <audio id="calAudio" controls hidden></audio>
+              <p id="calNoAudio" class="muted small" data-t="calNoAudio" hidden></p>
+              <ul id="calSentences" class="cal-sentences small muted"></ul>
+            </div>
+            <div class="row">
+              <label for="calLevel" class="cal-ends"><span data-t="calMore"></span><span data-t="calLess"></span></label>
+              <input id="calLevel" type="range" min="-3" max="3" step="1">
+            </div>
+            <dl class="glossary-result">
+              <dt data-t="calSkipped"></dt><dd id="calSkipped"></dd>
+              <dt data-t="calSpeech"></dt><dd id="calSpeech"></dd>
+            </dl>
+            <p id="calFit" class="small" hidden></p>
+            <div class="inline-buttons cal-actions">
+              <button id="calUse" class="primary" type="button" data-t="calUse"></button>
+              <button id="calDefault" type="button" data-t="calDefault"></button>
+              <button id="calForget" type="button" data-t="calForget" hidden></button>
+              <span id="calStatus" class="small"></span>
+            </div>
+          </div>
+        </details>
+      </section>
+
       <!-- Audio -->
       <section class="tab-panel" data-panel="audio" role="tabpanel">
         <h2 data-t="audioSource"></h2>
@@ -82,6 +150,7 @@
             </select>
           </div>
         </div>
+        <label class="check"><input id="gpuHelpers" type="checkbox"> <span data-t="gpuHelpers"></span></label>
       </section>
 
       <!-- Languages -->
@@ -274,6 +343,39 @@
           <button id="checkNow" type="button" data-t="checkNow"></button>
         </div>
         <p id="updateStatus" class="small muted"></p>
+      </section>
+
+      <!-- Startup -->
+      <section class="tab-panel" data-panel="startup" role="tabpanel">
+        <h2 data-t="tabStartup"></h2>
+        <div id="windowsOnly">
+          <label class="check"><input id="startWithWindows" type="checkbox"> <span data-t="startWithWindows"></span></label>
+          <p class="muted small" data-t="startWithWindowsHelp"></p>
+          <div class="row">
+            <label for="startWindow" data-t="startWindow"></label>
+            <select id="startWindow">
+              <option value="normal" data-t="startWindowNormal"></option>
+              <option value="minimized" data-t="startWindowMinimized"></option>
+              <option value="tray" data-t="startWindowTray"></option>
+            </select>
+          </div>
+        </div>
+        <label class="check"><input id="autoStartTranslation" type="checkbox"> <span data-t="autoStartTranslation"></span></label>
+        <p class="muted small" data-t="autoStartTranslationHelp"></p>
+        <label class="check" id="appWindowRow"><input id="appWindow" type="checkbox"> <span data-t="appWindow"></span></label>
+      </section>
+
+      <!-- Service log -->
+      <section class="tab-panel" data-panel="log" role="tabpanel">
+        <h2 data-t="tabLog"></h2>
+        <p class="muted small" data-t="logHelp"></p>
+        <label class="check"><input id="logEnabled" type="checkbox"> <span data-t="logEnabled"></span></label>
+        <label class="check"><input id="logAudio" type="checkbox"> <span data-t="logAudio"></span></label>
+        <p class="muted small" data-t="logAudioHelp"></p>
+        <div class="inline-buttons">
+          <button id="logOpen" type="button" data-t="logOpen"></button>
+          <span id="logFolder" class="small muted mono"></span>
+        </div>
       </section>
 
       <div class="save-bar">

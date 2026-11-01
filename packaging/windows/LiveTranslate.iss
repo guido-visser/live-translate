@@ -59,6 +59,10 @@ Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Descri
 ; An update started from the app runs silently and starts the app again afterwards.
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Flags: nowait runasoriginaluser; Check: RelaunchAfterUpdate
 
+[Registry]
+; Written by the app (Settings → Startup); only here so that uninstalling removes it.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "LiveTranslate"; Flags: dontcreatekey uninsdeletevalue
+
 [UninstallDelete]
 Type: files; Name: "{app}\VERSION"
 Type: files; Name: "{app}\LANGUAGE"

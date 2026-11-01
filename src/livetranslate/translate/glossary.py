@@ -11,8 +11,14 @@ For those fixed translations the engines need different tricks (tested on real s
   and even declines it ("het Вечеря Господня" → "Вечери Господней"), which
   placeholders can't do; it drops or garbles those.
 * LibreTranslate (Argos, via English): Cyrillic in a Dutch sentence gets lost on
-  the way through English, but "{1}" survives both steps, so the word is put back
-  afterwards (undeclined).
+  the way through English, but "[1]" survives both steps, so the word is put back
+  afterwards (undeclined). "[1]" beat "{1}" and "(1)": to Russian it survived 7 of 8
+  test sentences, against 3 and 6.
+
+A name stays as it is: an entry whose English word is the spoken word itself ("Kandelaar"
+→ "Kandelaar"). The engine would translate that word anyway ("Candlestick"), so a name is
+always a placeholder, with NLLB too. With a word filled in for a language (Cyrillic for
+Russian) that word goes back in, otherwise the name as it was spoken.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from ..config import GlossaryEntry
 
 HINT = "en"  # the language whose word stands in for languages without their own translation
 PLACEHOLDER = re.compile(r"[{\[(]\s*(\d+)\s*[}\])]")
+GLUED = re.compile(r"(?<=\w)(?=[{\[(]\s*\d+\s*[}\])])")
 DOUBLE_ARTICLE = re.compile(r"\b(?:the|a|an)\s+(the|a|an)\b(?=\s)", re.IGNORECASE)
 
 
@@ -36,6 +43,12 @@ def _form_pattern(form: str) -> str:
     # Lowercase forms match any capitalisation (also at the start of a sentence);
     # forms with a capital only match exactly, so "heer" (Mr.) is not "Heer" (Lord).
     return f"(?i:{pattern})" if form == form.lower() else pattern
+
+
+def is_name(entry: GlossaryEntry) -> bool:
+    """English word same as the spoken word: this is a name, never translate it."""
+    hint = entry.translations.get(HINT, "").strip().casefold()
+    return bool(hint) and hint in (form.casefold() for form in _forms(entry.term))
 
 
 class Glossary:
@@ -62,7 +75,8 @@ class Glossary:
 
         inline=True puts the translations in the sentence itself; otherwise they become
         numbered placeholders, returned in order for restore(). The English hint always
-        goes in the sentence itself: the engine has to translate it.
+        goes in the sentence itself: the engine has to translate it. Names always become
+        placeholders.
         """
         found = self._patterns.get(source)
         if found is None:
@@ -73,13 +87,16 @@ class Glossary:
         def replace(match: re.Match) -> str:
             entry = entries[int(match.lastgroup[1:])]
             translation = entry.translations.get(target, "").strip()
+            name = is_name(entry)
+            if name and not translation:
+                translation = match.group(0)
             if not translation:
                 hint = entry.translations.get(HINT, "").strip()
                 return hint if hint and source != HINT else match.group(0)
-            if inline:
+            if inline and not name:
                 return translation
             terms.append(translation)
-            return f"{{{len(terms)}}}"
+            return f"[{len(terms)}]"
 
         return pattern.sub(replace, text), terms
 
@@ -95,7 +112,8 @@ class Glossary:
             seen.add(n)
             return terms[n - 1]
 
-        restored = PLACEHOLDER.sub(replace, text)
+        # NLLB sometimes glues a placeholder to the word before it ("Де[1]").
+        restored = PLACEHOLDER.sub(replace, GLUED.sub(" ", text))
         # "the {1}" with {1} = "the Lord's Supper" must not become "the the Lord's Supper".
         restored = DOUBLE_ARTICLE.sub(r"\1", restored)
         return restored if len(seen) == len(terms) else None

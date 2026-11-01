@@ -32,9 +32,26 @@ HALLUCINATIONS = [
     "tv gelderland",
     "subtitles by",
     "thanks for watching",
+    "sous-titrage",
+    "sous -titrage",
     "продолжение следует",
     "субтитры",
 ]
+
+# Whisper captions what it can't make out, like a subtitler: "ZINGEN EN MUZIEK", "[muziek]", "♪".
+CAPTION_MARKS = re.compile(r"[♪♫♬]|^\s*[\[(*].*[\])*]\W*$")
+CAPTION_WORDS = {
+    "muziek", "zang", "zingen", "gezang", "koor", "piano", "orgel", "applaus", "gelach", "stilte",
+    "music", "singing", "applause", "laughter", "silence",
+    "музыка", "пение", "аплодисменты", "смех", "тишина",
+    "музика", "спів", "оплески", "сміх", "тиша",
+}  # fmt: skip
+CAPTION_LINKS = {"en", "de", "het", "and", "the", "и", "і", "та"}
+CAPTION_MIN_CAPITALS = 5  # shorter words in capitals may be real ("EO", "HGJB")
+
+MAX_REPEATS = 2  # the same sentence this many extra times in a row is dropped from then on
+SOUND_WINDOW_S = 2.0  # audio the singing check looks at; keep in step with sound.WINDOW_S
+SONG_NOTICED_AFTER_S = 4.0  # a song has been going for about this long when the check is sure
 
 ABBREVIATIONS = {"bijv.", "o.a.", "d.w.z.", "enz.", "joh.", "mr.", "dr.", "ds.", "st.", "vs.", "ca.", "nl."}
 SENTENCE_END = re.compile(r"[.!?…][\"'”’»)]*$")
@@ -50,6 +67,17 @@ class Word:
 
 def _norm(text: str) -> str:
     return re.sub(r"[^\w]", "", text.lower())
+
+
+def is_caption(text: str) -> bool:
+    """Is this Whisper describing the sound rather than writing down words?"""
+    if CAPTION_MARKS.search(text):
+        return True
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) >= CAPTION_MIN_CAPITALS and all(c.isupper() for c in letters):
+        return True
+    words = set(re.findall(r"\w+", text.lower()))
+    return bool(words & CAPTION_WORDS) and words <= CAPTION_WORDS | CAPTION_LINKS
 
 
 def join_words(words: list[Word]) -> str:
@@ -117,12 +145,17 @@ class StreamingTranscriber:
         on_partial: Callable[[str], None],
         on_sentence: Callable[[str], None],
         settings: AsrSettings,
+        is_singing: SpeechFn | None = None,
     ) -> None:
         self.transcribe = transcribe
         self.has_speech = has_speech
         self.on_partial = on_partial
         self.on_sentence = on_sentence
         self.settings = settings
+        self.is_singing = is_singing
+        self._in_song = False
+        self._last_text = ""
+        self._repeats = 0
         self.audio = np.zeros(0, dtype=np.float32)
         self.offset = 0.0
         self.hyp = HypothesisBuffer()
@@ -167,6 +200,12 @@ class StreamingTranscriber:
         self._new_samples = 0
         if not len(self.audio):
             return
+        if self.is_singing is not None:
+            singing = self.is_singing(self.audio[-int(SOUND_WINDOW_S * SAMPLE_RATE) :])
+            if singing:
+                self._skip_song()
+                return
+            self._in_song = False
         open_text = bool(self.pending or self.hyp.buffer)
         if not open_text and not self.has_speech(self.audio):
             self._trim_to(self.end_time - 0.5)
@@ -194,6 +233,21 @@ class StreamingTranscriber:
             self._force_long_sentence()
             self._trim_buffer()
         self._partial(join_words(self.pending + self.hyp.buffer))
+
+    def _skip_song(self) -> None:
+        """A song: no recognition while it lasts. What was said before it still goes out."""
+        if not self._in_song:
+            self._in_song = True
+            song_start = self.end_time - SONG_NOTICED_AFTER_S
+            before = sum(1 for w in self.pending if w.end <= song_start)
+            if before:
+                self._emit(before)
+            self.pending = []
+            self.hyp = HypothesisBuffer()
+            self.context = ""  # lyrics in the prompt would pull Whisper towards more lyrics
+            self._partial("")
+        self._trim_to(self.end_time - SOUND_WINDOW_S)
+        self.hyp.last_committed_time = self.offset
 
     def _partial(self, text: str) -> None:
         if text != self._last_partial:
@@ -227,6 +281,13 @@ class StreamingTranscriber:
         text = join_words(words)
         self.last_sentence_end = words[-1].end
         if not text or not _norm(text):
+            return
+        # Whisper can get stuck on one phrase ("Heerlijk." dozens of times). Saying a word
+        # twice is normal; a third time in a row isn't worth showing.
+        same = _norm(text) == self._last_text
+        self._repeats = self._repeats + 1 if same else 0
+        self._last_text = _norm(text)
+        if self._repeats >= MAX_REPEATS:
             return
         self.context = (self.context + " " + text)[-200:]
         self.on_sentence(text)
@@ -279,6 +340,7 @@ class WhisperEngine:
         self.language = language
         self.beam_size = settings.beam_size
         self._vad_options = None
+        self.on_segment: Callable[[str, float, float, bool], None] | None = None  # for the service log
 
     def transcribe(self, audio: np.ndarray, prompt: str, hotwords: str = "") -> list[Word]:
         segments, _info = self.model.transcribe(
@@ -294,17 +356,30 @@ class WhisperEngine:
         )
         words: list[Word] = []
         for seg in segments:
-            if seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0:
-                continue
             lowered = seg.text.lower()
-            if any(h in lowered for h in HALLUCINATIONS):
+            dropped = (
+                (seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0)
+                or any(h in lowered for h in HALLUCINATIONS)
+                or is_caption(seg.text)
+            )
+            if self.on_segment is not None:
+                self.on_segment(seg.text, seg.avg_logprob, seg.no_speech_prob, dropped)
+            if dropped:
                 continue
             words += [Word(w.start, w.end, w.word) for w in seg.words or []]
         return words
 
-    def has_speech(self, audio: np.ndarray) -> bool:
+    def _speech_parts(self, audio: np.ndarray) -> list[dict]:
         from faster_whisper.vad import VadOptions, get_speech_timestamps
 
         if self._vad_options is None:
             self._vad_options = VadOptions(min_speech_duration_ms=150, min_silence_duration_ms=100, speech_pad_ms=0)
-        return bool(get_speech_timestamps(audio, self._vad_options))
+        return get_speech_timestamps(audio, self._vad_options)
+
+    def has_speech(self, audio: np.ndarray) -> bool:
+        return bool(self._speech_parts(audio))
+
+    def voiced(self, audio: np.ndarray) -> float:
+        """The share of this audio that sounds like a voice."""
+        parts = self._speech_parts(audio)
+        return sum(p["end"] - p["start"] for p in parts) / max(1, len(audio))

@@ -10,7 +10,6 @@ import socket
 import sys
 import threading
 import time
-import webbrowser
 from logging.handlers import RotatingFileHandler
 
 import httpx
@@ -66,6 +65,17 @@ def single_instance(port: int) -> bool:
     return True
 
 
+def lower_priority() -> None:
+    """When the PC is busy the livestream goes first (LibreTranslate inherits this)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x4000)  # BELOW_NORMAL_PRIORITY_CLASS
+
+
 def enable_crash_log(path) -> None:
     """Native crashes (e.g. in a DLL) kill the process without a Python traceback; this
     writes the Python stack of every thread to crash.log when that happens."""
@@ -83,11 +93,14 @@ def enable_crash_log(path) -> None:
 def main() -> None:
     console = ensure_streams()
 
+    from . import autostart
     from .config import SettingsStore, data_dir
+    from .window import open_page
 
     parser = argparse.ArgumentParser(prog="livetranslate", description="Live translation of church services")
     parser.add_argument("--port", type=int, help="web server port (default from settings: 8000)")
-    parser.add_argument("--no-browser", action="store_true", help="don't open the admin page")
+    parser.add_argument("--no-browser", action="store_true", help="don't open the admin page, tray icon only")
+    parser.add_argument("--autostart", action="store_true", help="started with Windows: show what the settings say")
     parser.add_argument("--no-tray", action="store_true", help="no system tray icon (e.g. on a server)")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
@@ -113,20 +126,30 @@ def main() -> None:
     port = store.settings.port
     admin_url = f"http://127.0.0.1:{port}/admin"
 
+    start_window = store.settings.start_window if args.autostart else "normal"
+    show_page = not args.no_browser and start_window != "tray"
+
+    def open_admin(url: str = admin_url, minimized: bool = False) -> None:
+        open_page(url, store.settings.app_window, minimized=minimized)
+
     if already_running(port):
         log.info("Live Translate is already running; opening its page")
-        if not args.no_browser:
-            webbrowser.open(admin_url)
+        if show_page:
+            open_admin()
         return
     if not single_instance(port):
         log.info("Live Translate is already starting; opening its page when it is ready")
         for _ in range(150):
             if already_running(port):
-                if not args.no_browser:
-                    webbrowser.open(admin_url)
+                if show_page:
+                    open_admin()
                 break
             time.sleep(0.2)
         return
+
+    lower_priority()
+    if store.settings.start_with_windows:
+        autostart.apply(True)  # the install folder may have changed
 
     from .stt.cuda import setup_cuda_dll_paths
 
@@ -160,14 +183,14 @@ def main() -> None:
     def open_browser_when_ready() -> None:
         for _ in range(100):
             if server.started:
-                webbrowser.open(admin_url)
+                open_admin(minimized=start_window == "minimized")
                 return
             time.sleep(0.2)
 
-    if not args.no_browser:
+    if show_page:
         threading.Thread(target=open_browser_when_ready, daemon=True).start()
 
-    tray = None if args.no_tray else _make_tray(app, server, port)
+    tray = None if args.no_tray else _make_tray(app, server, port, open_admin)
 
     def request_exit() -> None:
         """Close the whole app (used when an update's installer takes over)."""
@@ -193,7 +216,7 @@ def main() -> None:
     server_thread.join(timeout=30)
 
 
-def _make_tray(app, server, port: int):
+def _make_tray(app, server, port: int, open_admin):
     try:
         from .tray import Tray, tray_state
     except Exception:
@@ -210,7 +233,8 @@ def _make_tray(app, server, port: int):
     def on_exit() -> None:
         server.should_exit = True
 
-    return Tray(get_status, f"http://127.0.0.1:{port}/admin", f"http://127.0.0.1:{port}/qr", on_exit)
+    admin_url, qr_url = f"http://127.0.0.1:{port}/admin", f"http://127.0.0.1:{port}/qr"
+    return Tray(get_status, admin_url, qr_url, on_exit, open_page=open_admin)
 
 
 if __name__ == "__main__":

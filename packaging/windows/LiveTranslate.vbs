@@ -2,7 +2,7 @@
 ' setup runs (so its progress is visible); normal starts are silent and the app
 ' lives in the system tray.
 Option Explicit
-Dim sh, fs, app, data, ver, marker, style
+Dim sh, fs, app, data, ver, marker, style, args, arg
 Set sh = CreateObject("WScript.Shell")
 Set fs = CreateObject("Scripting.FileSystemObject")
 app = fs.GetParentFolderName(WScript.ScriptFullName)
@@ -13,4 +13,8 @@ If fs.FileExists(app & "\VERSION") Then ver = Trim(fs.OpenTextFile(app & "\VERSI
 marker = data & "\venv\.installed-" & ver
 
 If fs.FileExists(marker) Then style = 0 Else style = 1
-sh.Run """" & app & "\LiveTranslate.cmd""", style, False
+args = ""
+For Each arg In WScript.Arguments
+    args = args & " " & arg
+Next
+sh.Run """" & app & "\LiveTranslate.cmd""" & args, style, False

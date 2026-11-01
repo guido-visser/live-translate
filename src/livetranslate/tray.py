@@ -111,11 +111,13 @@ class Tray:
         qr_url: str,
         on_exit: Callable[[], None],
         language: str | None = None,
+        open_page: Callable[[str], None] = webbrowser.open,
     ):
         self.get_status = get_status  # -> (tray state, number of listeners)
         self.admin_url = admin_url
         self.qr_url = qr_url
         self.on_exit = on_exit
+        self.open_page = open_page
         self.texts = TEXTS[language or ui_language()]
         self._state = ("", -1)
         self._stop = threading.Event()
@@ -138,7 +140,7 @@ class Tray:
         return status_text(state or "stopped", max(listeners, 0), self.texts)
 
     def _open_admin(self, icon=None, item=None) -> None:
-        webbrowser.open(self.admin_url)
+        threading.Thread(target=self.open_page, args=(self.admin_url,), daemon=True).start()
 
     def _open_qr(self, icon=None, item=None) -> None:
         webbrowser.open(self.qr_url)

@@ -200,6 +200,23 @@ input[type=range] { width: 100%; }
 .glossary-result dt { color: var(--muted); }
 .glossary-result dd { margin: 0; }
 @media (max-width: 600px) { .row.pair { grid-template-columns: 1fr; } }
+.cal-timeline { position: relative; height: 44px; margin-top: 12px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--bg); }
+.cal-stretch { position: absolute; top: 0; bottom: 0; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+.cal-stretch:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.cal-stretch.skipped { background: var(--warn); }
+.cal-stretch.skipped:hover { background: color-mix(in srgb, var(--warn) 80%, var(--text)); }
+.cal-stretch:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cal-label { position: absolute; bottom: 0; height: 7px; pointer-events: none; }
+.cal-label.music { background: var(--accent); }
+.cal-label.speech { background: var(--ok); }
+.cal-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); pointer-events: none; }
+.cal-axis { position: relative; height: 18px; margin-bottom: 12px; }
+.cal-axis span { position: absolute; }
+.cal-picked { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.cal-picked audio { width: 100%; }
+.cal-actions { flex-wrap: wrap; }
+.cal-sentences { margin: 6px 0 0; padding-left: 18px; }
+.cal-ends { display: flex; justify-content: space-between; gap: 12px; }
 
 /* -- main screen: side column, quick audio, header toggle ------------------------ */
 .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }

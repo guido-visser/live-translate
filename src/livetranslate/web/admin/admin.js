@@ -33,8 +33,23 @@
     $("pauseBtn").classList.toggle("warn", status.paused);
     $("error").textContent = status.error || "";
     $("error").hidden = !status.error;
+    $("singingPill").hidden = !status.singing;
+    $("loggingPill").hidden = !status.logging;
+    $("markRow").hidden = !status.logging;
+    setSwitch($("skipSinging"), status.skip_singing);
     renderSpeakers();
   }
+
+  $("skipSinging").addEventListener("click", async () => {
+    status = await api("/api/admin/singing", { method: "POST", body: JSON.stringify({ on: !status.skip_singing }) });
+    renderStatus();
+  });
+
+  async function markMoment() {
+    await api("/api/admin/mark", { method: "POST" });
+    $("markDone").textContent = `${t("marked")} ${new Date().toLocaleTimeString()}`;
+  }
+  $("markBtn").addEventListener("click", markMoment);
 
   $("startBtn").addEventListener("click", async () => {
     await api(status.state === "stopped" ? "/api/admin/start" : "/api/admin/stop", { method: "POST" });
@@ -99,6 +114,10 @@
     if (e.code === "Space" && document.activeElement.tagName !== "BUTTON") {
       e.preventDefault();
       if (!$("pauseBtn").disabled) $("pauseBtn").click();
+      return;
+    }
+    if (e.key.toLowerCase() === "m" && status.logging) {
+      markMoment();
       return;
     }
     const lang = state?.speaker_languages?.[Number(e.key) - 1];

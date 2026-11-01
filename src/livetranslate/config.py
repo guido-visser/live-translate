@@ -54,8 +54,9 @@ class AsrSettings(BaseModel):
 class TranslationSettings(BaseModel):
     engine: Literal["libretranslate", "nllb"] = "libretranslate"
     nllb_model: Literal["600M", "1.3B"] = "600M"
-    # CPU by default so the GPU stays free for speech recognition and vMix.
-    nllb_device: Literal["cpu", "cuda", "auto"] = "cpu"
+    # GPU when there is one: on the CPU each sentence briefly takes several cores, which
+    # can make a livestream on the same PC stutter.
+    nllb_device: Literal["cpu", "cuda", "auto"] = "auto"
 
 
 class VmixSettings(BaseModel):
@@ -88,6 +89,13 @@ class RemoteSettings(BaseModel):
     local_port: int = Field(8001, ge=1024, le=65535)
 
 
+class ServiceLogSettings(BaseModel):
+    """Keep a log of each service on this PC to improve the app with; off unless chosen (see servicelog.py)."""
+
+    enabled: bool = False
+    audio: bool = False
+
+
 class GlossaryEntry(BaseModel):
     """A word the speech recognition should know, optionally with fixed translations."""
 
@@ -117,7 +125,21 @@ def default_glossary() -> list[GlossaryEntry]:
     return [GlossaryEntry(term=term, translations={"en": en}) for term, en in rows]
 
 
+# What makes this church's setup its own; exported and imported as one file (Settings → Church).
+PROFILE_FIELDS = (
+    "church_name",
+    "church_short_name",
+    "source_language",
+    "target_languages",
+    "quick_languages",
+    "tts_enabled",
+    "glossary",
+)
+
+
 class Settings(BaseModel):
+    church_name: str = ""  # in full: "Evangeliegemeente De Kandelaar"
+    church_short_name: str = ""  # as people say it: "De Kandelaar"
     source_language: str = "nl"
     target_languages: list[str] = Field(default_factory=lambda: ["ru", "uk", "en"])
     # Languages offered as quick "spoken language" buttons next to the main language.
@@ -134,6 +156,20 @@ class Settings(BaseModel):
     libretranslate_port: int = 5001
     # Look for a new version on GitHub now and then (installing is always the operator's choice).
     check_updates: bool = True
+    # Start the app (in the tray) when this user signs in to Windows.
+    start_with_windows: bool = False
+    # What a start with Windows shows: the window, the window minimized, or only the tray icon.
+    start_window: Literal["normal", "minimized", "tray"] = "tray"
+    # Begin translating as soon as the app has started, without pressing Start.
+    auto_start_translation: bool = False
+    # Show the operator page in its own window; off = in the browser.
+    app_window: bool = True
+    # Don't translate songs: speech is still translated, also with instruments playing.
+    skip_singing: bool = True
+    song_level: int = Field(default=0, ge=-3, le=3)  # stt.sound.SONG_LEVELS, set in Settings → Church
+    # Run the sound classifier and the voices on the GPU (DirectML) when possible.
+    gpu_helpers: bool = True
+    service_log: ServiceLogSettings = Field(default_factory=ServiceLogSettings)
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     glossary: list[GlossaryEntry] = Field(default_factory=default_glossary)
     vmix: VmixSettings = Field(default_factory=VmixSettings)

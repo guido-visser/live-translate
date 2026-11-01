@@ -17,6 +17,8 @@ from .audio.capture import AudioSource, FileSource, create_source
 from .config import SettingsStore
 from .integrations.vmix import VmixOutput
 from .server.hub import Hub
+from .servicelog import ServiceLog
+from .stt.sound import SONG_LEVELS, SingingGate, SoundClassifier
 from .stt.transcriber import StreamingTranscriber, WhisperEngine
 from .translate.service import TranslationService
 from .tts.piper import SpeechService
@@ -55,8 +57,12 @@ class Pipeline:
         self.hub = hub
         self.vmix = vmix
         self.models_dir = data_dir / "models" / "whisper"
+        self.logs_dir = data_dir / "service-logs"
         self.state = "stopped"  # stopped|loading|running
         self.paused = False
+        self.singing = False  # a song is being skipped right now
+        self.service_log: ServiceLog | None = None
+        self._sound: SoundClassifier | None = None
         self.error = ""
         self.history: deque[Segment] = deque(maxlen=60)
         self.stats = {"asr_pass_s": 0.0, "asr_buffer_s": 0.0, "translate_ms": 0.0, "device": ""}
@@ -93,6 +99,9 @@ class Pipeline:
             "paused": self.paused,
             "error": self.error,
             "speaker_language": self.speaker_language,
+            "singing": self.singing,
+            "skip_singing": self.settings.skip_singing,
+            "logging": self.service_log is not None,
         }
 
     def speaker_languages(self) -> list[str]:
@@ -119,9 +128,11 @@ class Pipeline:
             self._broadcast_status()
             try:
                 await asyncio.to_thread(self._load_engine)
+                await asyncio.to_thread(self._load_sound)
                 self._source = create_source(self.settings.audio)
                 self._audio = queue.Queue()
                 self._source.start(self._on_audio)
+                self._open_log()
             except Exception as exc:
                 log.exception("Could not start")
                 self.error = str(exc)
@@ -147,6 +158,8 @@ class Pipeline:
             self._source = None
             self._thread = None
             self.state = "stopped"
+            self.singing = False
+            self._close_log()
             self.hub.partial(self.speaker_language, "")
             self._broadcast_status()
 
@@ -162,7 +175,42 @@ class Pipeline:
 
     def set_paused(self, paused: bool) -> None:
         self.paused = paused
+        self._log("paused" if paused else "resumed")
         self._broadcast_status()
+
+    def mark(self) -> None:
+        """The operator noticed something; the log gets the moment to look at afterwards."""
+        self._log("mark")
+
+    def _log(self, kind: str, **fields) -> None:
+        if self.service_log is not None:
+            self.service_log.event(kind, **fields)
+
+    def _open_log(self) -> None:
+        s = self.settings
+        if not s.service_log.enabled:
+            return
+        try:
+            self.service_log = ServiceLog(self.logs_dir, s.service_log.audio)
+        except OSError:
+            log.exception("Could not start the service log")
+            return
+        self._log(
+            "start",
+            model=s.asr.model,
+            engine=s.translation.engine,
+            nllb=s.translation.nllb_model,
+            audio_input=s.audio.kind,
+            skip_singing=s.skip_singing,
+            song_level=s.song_level,
+            glossary=[e.model_dump() for e in s.glossary],
+        )
+
+    def _close_log(self) -> None:
+        if self.service_log is not None:
+            self._log("stop")
+            self.service_log.close()
+            self.service_log = None
 
     async def set_speaker_language(self, lang: str) -> None:
         """Switch recognition to another language without reloading the model."""
@@ -197,6 +245,13 @@ class Pipeline:
         self._engine_key = key
         self.stats["device"] = self._engine.device
 
+    def _load_sound(self) -> None:
+        try:
+            self._sound = SoundClassifier(self.settings.gpu_helpers)
+        except Exception:  # translating everything beats not translating at all
+            log.exception("The sound classifier could not start; songs won't be skipped")
+            self._sound = None
+
     # -- recognition thread ----------------------------------------------------
 
     def _on_audio(self, chunk: np.ndarray) -> None:
@@ -219,13 +274,53 @@ class Pipeline:
             # Read per pass, so glossary changes apply without a restart.
             return engine.transcribe(audio, prompt, self.translator.glossary.hotwords(engine.language))
 
-        transcriber = StreamingTranscriber(transcribe, engine.has_speech, on_partial, on_sentence, self.settings.asr)
+        gate = SingingGate()
+
+        def is_singing(audio: np.ndarray) -> bool:
+            if self._sound is None:
+                return False
+            try:
+                scores = self._sound.scores(audio)
+                voiced = engine.voiced(audio)
+            except Exception:
+                log.exception("The sound classifier failed; songs won't be skipped")
+                self._sound = None
+                return False
+            gate.limits = SONG_LEVELS[self.settings.song_level]  # read per pass: calibrating applies right away
+            detected = gate.update(scores, voiced)
+            singing = detected and self.settings.skip_singing
+            self._log(
+                "sound",
+                speech=round(scores.speech, 3),
+                singing=round(scores.singing, 3),
+                music=round(scores.music, 3),
+                voiced=round(voiced, 3),
+                detected=detected,
+            )
+            if singing != self.singing:
+                self.singing = singing
+                log.info("Song %s", "started; not translating" if singing else "over; translating again")
+                loop.call_soon_threadsafe(self._broadcast_status)
+            return singing
+
+        def on_segment(text: str, logprob: float, no_speech: float, dropped: bool) -> None:
+            self._log("whisper", text=text, logprob=round(logprob, 3), no_speech=round(no_speech, 3), dropped=dropped)
+
+        def feed(chunk: np.ndarray) -> None:
+            transcriber.add_audio(chunk)
+            if self.service_log is not None:
+                self.service_log.audio(chunk)
+
+        engine.on_segment = on_segment if self.service_log is not None else None
+        transcriber = StreamingTranscriber(
+            transcribe, engine.has_speech, on_partial, on_sentence, self.settings.asr, is_singing
+        )
         was_paused = False
         while not self._stop.is_set():
             try:
-                transcriber.add_audio(self._audio.get(timeout=0.2))
+                feed(self._audio.get(timeout=0.2))
                 while True:  # drain everything that arrived while we were busy
-                    transcriber.add_audio(self._audio.get_nowait())
+                    feed(self._audio.get_nowait())
             except queue.Empty:
                 pass
             if self.speaker_language != engine.language:
@@ -296,6 +391,7 @@ class Pipeline:
         seg = Segment(self._next_id, text, created, src)
         self._next_id += 1
         self.history.append(seg)
+        self._log("sentence", id=seg.id, lang=src, text=text)
         self.hub.to_admins({"type": "segment", "id": seg.id, "text": text, "lang": src})
         self.hub.to_language(src, {"type": "segment", "id": seg.id, "text": text, "lang": src})
         self.speech.say(src, text)
@@ -307,6 +403,7 @@ class Pipeline:
             self.stats["translate_ms"] = round((time.perf_counter() - started) * 1000)
         for lang, translated in zip(langs, results):
             if translated:
+                self._log("translation", id=seg.id, lang=lang, text=translated)
                 self.hub.to_language(lang, {"type": "segment", "id": seg.id, "text": translated, "lang": lang})
                 self.speech.say(lang, translated)
         if self.vmix is not None and self.vmix.active:

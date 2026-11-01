@@ -480,6 +480,17 @@
     $("pin").value = s.admin_pin;
     $("port").value = s.port;
     $("checkUpdates").checked = s.check_updates;
+    $("windowsOnly").hidden = $("appWindowRow").hidden = !state.windows;
+    $("churchName").value = s.church_name;
+    $("churchShort").value = s.church_short_name;
+    $("startWithWindows").checked = s.start_with_windows;
+    $("startWindow").value = s.start_window;
+    $("gpuHelpers").checked = s.gpu_helpers;
+    $("logEnabled").checked = s.service_log.enabled;
+    $("logAudio").checked = s.service_log.audio;
+    $("logFolder").textContent = state.logs_folder;
+    $("autoStartTranslation").checked = s.auto_start_translation;
+    $("appWindow").checked = s.app_window;
     $("remoteEnabled").checked = s.remote.enabled;
     $("remoteUrl").value = s.remote.public_url;
     $("remoteHost").value = s.remote.ssh_host;
@@ -524,6 +535,15 @@
     s.wifi_name = $("wifi").value.trim();
     s.admin_pin = $("pin").value.trim();
     s.check_updates = $("checkUpdates").checked;
+    s.church_name = $("churchName").value.trim();
+    s.church_short_name = $("churchShort").value.trim();
+    s.start_with_windows = $("startWithWindows").checked;
+    s.start_window = $("startWindow").value;
+    s.gpu_helpers = $("gpuHelpers").checked;
+    s.service_log.enabled = $("logEnabled").checked;
+    s.service_log.audio = $("logAudio").checked;
+    s.auto_start_translation = $("autoStartTranslation").checked;
+    s.app_window = $("appWindow").checked;
     const r = remoteFromForm();
     s.remote.enabled = $("remoteEnabled").checked;
     s.remote.public_url = r.url;
@@ -533,6 +553,206 @@
     s.remote.remote_port = r.port;
     return s;
   }
+
+  $("logOpen").addEventListener("click", () => api("/api/admin/logs/open", { method: "POST" }));
+
+  // -- church --------------------------------------------------------------------------------
+
+  // "De Kandelaar" is also said as "de Kandelaar" and "Kandelaar".
+  function nameForms(name) {
+    const match = name.match(/^(De|Het)\s+(.+)$/i);
+    return match ? [name, `${match[1].toLowerCase()} ${match[2]}`, match[2]] : [name];
+  }
+
+  // Glossary rows with the English word the same as the name: that keeps a name from being translated.
+  $("churchProtect").addEventListener("click", () => {
+    const main = $("sourceLang").value;
+    for (const name of [$("churchName").value.trim(), $("churchShort").value.trim()]) {
+      const known = glossary.some((e) => e.lang === main && e.term.split(",").map((f) => f.trim()).includes(name));
+      if (name && !known) glossary.push({ lang: main, term: nameForms(name).join(", "), translations: { en: name } });
+    }
+    markDirty();
+    renderGlossary();
+    showTab("glossary");
+  });
+
+  $("profileImport").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const status = $("profileStatus");
+    try {
+      const profile = JSON.parse(await file.text());
+      if (!Array.isArray(profile.glossary)) throw new Error("no glossary");
+      for (const key of state.profile_fields) {
+        if (key in profile) state.settings[key] = profile[key];
+      }
+      fill();
+      markDirty();
+      status.textContent = t("profileImported");
+      status.className = "small";
+    } catch {
+      status.textContent = t("profileBad");
+      status.className = "small error";
+    }
+  });
+
+  // -- fitting the song detection to this church's sound, from a logged service --------------
+
+  let calService = null; // the chosen service with what each slider level would skip
+  let calLabels = []; // stretches the operator said are music or speech
+  let calPick = null; // the stretch clicked on the timeline, and where in it
+
+  const clockTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const minutes = (s) => t("calMinutes").replace("{n}", Math.round(s / 60));
+  const calUrl = (path) => withPin(`/api/admin/logs/${encodeURIComponent(calService.name)}/${path}`);
+  const calLevel = () => calService.levels[$("calLevel").value];
+
+  // The whole service as stretches that are skipped or translated at this level.
+  function calStretches() {
+    const stretches = [];
+    let at = 0;
+    for (const [start, end] of calLevel().skipped) {
+      if (start > at) stretches.push({ start: at, end: start, skipped: false });
+      stretches.push({ start, end, skipped: true });
+      at = end;
+    }
+    if (at < calService.duration) stretches.push({ start: at, end: calService.duration, skipped: false });
+    return stretches;
+  }
+
+  function renderCalibration() {
+    if (!calService) return;
+    const share = (s) => `${(s / calService.duration) * 100}%`;
+    const bar = $("calTimeline");
+    bar.textContent = "";
+    for (const stretch of calStretches()) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `cal-stretch${stretch.skipped ? " skipped" : ""}`;
+      b.style.left = share(stretch.start);
+      b.style.width = share(stretch.end - stretch.start);
+      b.title = `${clockTime(stretch.start)} – ${clockTime(stretch.end)}`;
+      b.setAttribute("aria-label", `${b.title} ${t(stretch.skipped ? "calNotTranslated" : "calTranslated")}`);
+      b.addEventListener("click", (e) => {
+        const box = b.getBoundingClientRect();
+        const part = e.detail ? (e.clientX - box.left) / box.width : 0; // a key press has no position
+        calPick = { ...stretch, at: stretch.start + part * (stretch.end - stretch.start) };
+        renderCalibration();
+      });
+      bar.appendChild(b);
+    }
+    for (const label of calLabels) {
+      const strip = document.createElement("div");
+      strip.className = `cal-label ${label.kind}`;
+      strip.style.left = share(label.start);
+      strip.style.width = share(label.end - label.start);
+      bar.appendChild(strip);
+    }
+    for (const mark of calService.marks) {
+      const tick = document.createElement("div");
+      tick.className = "cal-mark";
+      tick.style.left = share(mark);
+      bar.appendChild(tick);
+    }
+    const axis = $("calAxis");
+    axis.textContent = "";
+    const step = calService.duration > 3600 ? 1800 : 600;
+    for (let s = 0; s < calService.duration; s += step) {
+      const tick = document.createElement("span");
+      tick.style.left = share(s);
+      tick.textContent = clockTime(s);
+      axis.appendChild(tick);
+    }
+
+    $("calSkipped").textContent = minutes(calLevel().skipped_s);
+    $("calSpeech").textContent = minutes(calLevel().speech_s);
+    $("calSpeech").className = calLevel().speech_s >= 30 ? "warn-text" : "";
+    const inUse = Number($("calLevel").value) === state.settings.song_level;
+    $("calUse").disabled = inUse;
+    $("calStatus").textContent = inUse ? t("calInUse") : "";
+    $("calForget").hidden = !calLabels.length;
+
+    $("calPicked").hidden = !calPick;
+    if (!calPick) return;
+    // The slider can move the edges of a stretch, so show what the clicked moment is now part of.
+    const now = calStretches().find((s) => s.start <= calPick.at && calPick.at <= s.end);
+    if (now) Object.assign(calPick, { start: now.start, end: now.end, skipped: now.skipped });
+    const verdict = t(calPick.skipped ? "calNotTranslated" : "calTranslated");
+    $("calPickedText").textContent = `${clockTime(calPick.start)} – ${clockTime(calPick.end)} · ${verdict}`;
+    $("calListen").hidden = !calService.audio;
+    $("calNoAudio").hidden = calService.audio;
+    const list = $("calSentences");
+    list.textContent = "";
+    const said = calService.sentences.filter((s) => calPick.start <= s.t && s.t <= calPick.end);
+    for (const sentence of said.slice(0, 6)) {
+      const li = document.createElement("li");
+      li.textContent = `${clockTime(sentence.t)} ${sentence.text}`;
+      list.appendChild(li);
+    }
+  }
+
+  async function chooseService(name) {
+    calService = await api(`/api/admin/logs/${encodeURIComponent(name)}/analysis`);
+    calLabels = [];
+    calPick = null;
+    $("calFit").hidden = true;
+    $("calAudio").hidden = true;
+    $("calAudio").removeAttribute("src");
+    $("calLevel").value = state.settings.song_level;
+    renderCalibration();
+  }
+
+  async function loadServices() {
+    const found = await api("/api/admin/logs");
+    $("calEmpty").hidden = found.length > 0;
+    $("calBody").hidden = !found.length;
+    if (!found.length) return;
+    const select = $("calService");
+    select.textContent = "";
+    for (const service of found) {
+      const when = `${service.name.slice(0, 10)} ${service.name.slice(11, 16).replace("-", ":")}`;
+      select.appendChild(new Option(`${when} · ${minutes(service.duration)}${service.audio ? " ♪" : ""}`, service.name));
+    }
+    await chooseService(found[0].name);
+  }
+
+  async function labelPicked(kind) {
+    calLabels = calLabels.filter((l) => l.end <= calPick.start || l.start >= calPick.end);
+    calLabels.push({ start: calPick.start, end: calPick.end, kind });
+    const { level } = await api(calUrl("fit"), { method: "POST", body: JSON.stringify({ labels: calLabels }) });
+    $("calLevel").value = level;
+    $("calFit").textContent = t("calFitted");
+    $("calFit").hidden = false;
+    renderCalibration();
+  }
+
+  async function useLevel(level) {
+    await api("/api/admin/singing/level", { method: "POST", body: JSON.stringify({ level }) });
+    state.settings.song_level = level;
+    $("calLevel").value = level;
+    renderCalibration();
+    $("calStatus").textContent = t("calApplied");
+  }
+
+  $("calibration").addEventListener("toggle", (e) => { if (e.target.open && !calService) loadServices(); });
+  $("calService").addEventListener("change", (e) => chooseService(e.target.value));
+  $("calLevel").addEventListener("input", () => { $("calFit").hidden = true; renderCalibration(); });
+  $("calIsMusic").addEventListener("click", () => labelPicked("music"));
+  $("calIsSpeech").addEventListener("click", () => labelPicked("speech"));
+  $("calUse").addEventListener("click", () => useLevel(Number($("calLevel").value)));
+  $("calDefault").addEventListener("click", () => useLevel(0));
+  $("calForget").addEventListener("click", () => {
+    calLabels = [];
+    $("calFit").hidden = true;
+    renderCalibration();
+  });
+  $("calListen").addEventListener("click", () => {
+    const player = $("calAudio");
+    player.src = calUrl(`clip?t=${calPick.at}`);
+    player.hidden = false;
+    player.play();
+  });
 
   // -- updates (installing happens on the main screen) -------------------------------------
 
@@ -585,8 +805,8 @@
     $("saved").hidden = false;
   }
 
-  // The test sentence is not a setting.
-  const isSetting = (e) => e.target.id !== "glossarySample";
+  // The test sentence is not a setting, and calibrating saves its own.
+  const isSetting = (e) => e.target.id !== "glossarySample" && !e.target.closest("#calibration");
   form.addEventListener("input", (e) => isSetting(e) && markDirty());
   form.addEventListener("change", (e) => isSetting(e) && markDirty());
   form.addEventListener("submit", (e) => { e.preventDefault(); save(); });
@@ -622,6 +842,7 @@
     renderVmixLanguages();
     renderGlossary();
     renderUpdate();
+    renderCalibration();
   });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));

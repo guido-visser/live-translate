@@ -13,6 +13,8 @@
     <div class="pills">
       <span id="statePill" class="pill"></span>
       <span id="trPill" class="pill"></span>
+      <span id="singingPill" class="pill paused" data-t="singingPill" hidden></span>
+      <span id="loggingPill" class="pill" data-t="loggingPill" hidden></span>
     </div>
     <div class="top-actions">
       <button id="perfBtn" class="icon-btn" type="button" aria-pressed="false"><span aria-hidden="true">📈</span> <span data-t="performance"></span></button>
@@ -43,6 +45,14 @@
       <div class="speaker-row">
         <span class="speaker-label" data-t="spokenLanguage"></span>
         <div id="speakerButtons" class="speaker-buttons" role="radiogroup"></div>
+      </div>
+      <label class="switch-row">
+        <span data-t="skipSinging"></span>
+        <button id="skipSinging" class="switch" type="button" role="switch" aria-checked="false"></button>
+      </label>
+      <div id="markRow" class="inline-buttons" hidden>
+        <button id="markBtn" type="button" data-t="markMoment"></button>
+        <span id="markDone" class="small muted"></span>
       </div>
       <div class="meter-row">
         <span data-t="level"></span>

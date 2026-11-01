@@ -17,7 +17,7 @@ import httpx
 import numpy as np
 import soxr
 
-from ..native import onnxruntime_failed, require_onnxruntime
+from ..native import onnx_session, onnxruntime_failed, require_onnxruntime
 
 log = logging.getLogger(__name__)
 
@@ -87,9 +87,33 @@ class VoiceBank:
         self._voices: dict = {}
         self._failed: set[str] = set()
         self._lock = threading.Lock()
+        self.gpu = True
 
     def has_voice(self, lang: str) -> bool:
         return lang in VOICES and lang not in self._failed and not onnxruntime_failed()
+
+    def set_gpu(self, gpu: bool) -> None:
+        """Voices load again on the chosen processor when they're next used."""
+        with self._lock:
+            self.gpu = gpu
+            self._voices.clear()
+
+    def _files(self, lang: str) -> tuple[Path, Path]:
+        """The voice's files, downloaded when missing."""
+        name = VOICES[lang]
+        onnx = self.dir / (name.rsplit("/", 1)[1] + ".onnx")
+        meta = onnx.with_suffix(".onnx.json")
+        for target, suffix in ((onnx, ".onnx"), (meta, ".onnx.json")):
+            if not target.exists():
+                log.info("Downloading Piper voice %s%s", name, suffix)
+                tmp = target.with_suffix(target.suffix + ".part")
+                with httpx.stream("GET", HF_BASE + name + suffix, follow_redirects=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(tmp, "wb") as f:
+                        for chunk in r.iter_bytes():
+                            f.write(chunk)
+                tmp.replace(target)
+        return onnx, meta
 
     def _voice(self, lang: str):
         with self._lock:
@@ -98,21 +122,10 @@ class VoiceBank:
             require_onnxruntime()  # Piper runs on onnxruntime, which can crash the app on import
             from piper import PiperVoice
 
-            name = VOICES[lang]
-            onnx = self.dir / (name.rsplit("/", 1)[1] + ".onnx")
-            meta = onnx.with_suffix(".onnx.json")
             try:
-                for target, suffix in ((onnx, ".onnx"), (meta, ".onnx.json")):
-                    if not target.exists():
-                        log.info("Downloading Piper voice %s%s", name, suffix)
-                        tmp = target.with_suffix(target.suffix + ".part")
-                        with httpx.stream("GET", HF_BASE + name + suffix, follow_redirects=True, timeout=60) as r:
-                            r.raise_for_status()
-                            with open(tmp, "wb") as f:
-                                for chunk in r.iter_bytes():
-                                    f.write(chunk)
-                        tmp.replace(target)
+                onnx, meta = self._files(lang)
                 voice = PiperVoice.load(onnx, config_path=meta)
+                voice.session = onnx_session(onnx, self.gpu)
             except Exception:
                 log.exception("Could not load Piper voice for %s", lang)
                 self._failed.add(lang)
@@ -130,7 +143,15 @@ class VoiceBank:
         if voice.config.phoneme_type == PhonemeType.TEXT:
             text = text.lower()  # character-based voices (e.g. Ukrainian) only know lowercase letters
         parts, rate = [], STREAM_RATE
-        for chunk in voice.synthesize(text, syn_config=SynthesisConfig(length_scale=length_scale)):
+        config = SynthesisConfig(length_scale=length_scale)
+        try:
+            chunks = list(voice.synthesize(text, syn_config=config))
+        except Exception:
+            # E.g. the GPU ran out of memory or the driver restarted. Try once on the CPU.
+            log.exception("Voice for %s failed; continuing on the CPU", lang)
+            voice.session = onnx_session(self._files(lang)[0], gpu=False)
+            chunks = list(voice.synthesize(text, syn_config=config))
+        for chunk in chunks:
             parts.append(chunk.audio_float_array)
             rate = chunk.sample_rate
         if not parts:
@@ -183,6 +204,10 @@ class LanguageStream:
 
     async def _synth(self) -> None:
         gap = np.zeros(int(STREAM_RATE * 0.15), dtype=np.int16)
+        try:
+            await asyncio.to_thread(self.bank._voice, self.lang)  # before the first sentence needs it
+        except Exception:
+            log.exception("Could not load the voice for %s", self.lang)
         while True:
             text = await self._texts.get()
             # Speak faster as soon as we fall behind the speaker: translations are often
@@ -268,9 +293,9 @@ class SpeechService:
         return self.streams[lang]
 
     async def warm_up(self, lang: str) -> None:
-        """Download/load the voice ahead of time so the first sentence isn't delayed."""
+        """Download the voice ahead of time; it takes GPU memory only once someone listens."""
         if self.has_voice(lang):
             try:
-                await asyncio.to_thread(self.bank._voice, lang)
+                await asyncio.to_thread(self.bank._files, lang)
             except Exception:
                 pass
