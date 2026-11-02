@@ -68,6 +68,33 @@ def test_autostart_writes_and_removes_the_run_value():
     assert autostart.apply(False, name)  # removing twice is fine
 
 
+def test_window_state_defaults_until_it_was_saved(tmp_path):
+    path = tmp_path / "window.json"
+    default = {"width": window.WIDTH, "height": window.HEIGHT, "maximized": False}
+    assert window.load_state(path, "Live Translate") == default
+    saved = {"width": 900, "height": 700, "maximized": True}
+    window.save_state(path, "Live Translate", saved)
+    window.save_state(path, "QR", {"width": 500, "height": 600, "maximized": False})
+    assert window.load_state(path, "Live Translate") == saved  # each window keeps its own
+    assert window.load_state(path, "Other") == default
+
+
+@pytest.mark.parametrize("content", ["not json", "[]", '{"Live Translate": {"width": "x"}}', '{"Live Translate": 3}'])
+def test_window_state_survives_a_damaged_file(tmp_path, content):
+    path = tmp_path / "window.json"
+    path.write_text(content)
+    assert window.load_state(path, "Live Translate")["width"] == window.WIDTH
+    window.save_state(path, "Live Translate", {"width": 900, "height": 700, "maximized": False})
+    assert window.load_state(path, "Live Translate")["width"] == 900
+
+
+def test_window_opens_centered_and_on_screen():
+    assert window.centered(900, 700, (0, 0, 1920, 1040)) == (510, 170, 900, 700)
+    assert window.centered(900, 700, (100, 40, 1920, 1040)) == (610, 210, 900, 700)  # taskbar on the left or top
+    assert window.centered(1900, 1000, (0, 0, 1280, 680)) == (0, 0, 1280, 680)  # now on a smaller screen
+    assert window.centered(100, 100, (0, 0, 1920, 1040))[2:] == window.MIN_SIZE
+
+
 def test_open_page_falls_back_to_the_browser(monkeypatch):
     opened = []
     monkeypatch.setattr(window.webbrowser, "open", opened.append)
