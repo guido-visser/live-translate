@@ -457,7 +457,7 @@ wheels = [
 
 [[package]]
 name = "livetranslate"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -482,6 +482,7 @@ dependencies = [
     { name = "soundfile" },
     { name = "soxr" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -513,6 +514,7 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.12" },
     { name = "soxr", specifier = ">=0.3.7" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
+    { name = "websockets", specifier = ">=14" },
 ]
 
 [package.metadata.requires-dev]

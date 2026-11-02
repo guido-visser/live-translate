@@ -15,6 +15,8 @@ import numpy as np
 
 from .audio.capture import AudioSource, FileSource, create_source
 from .config import SettingsStore
+from .integrations.obs import ObsOutput
+from .integrations.subtitles import SubtitleOutput
 from .integrations.vmix import VmixOutput
 from .server.hub import Hub
 from .servicelog import ServiceLog
@@ -50,12 +52,13 @@ class Pipeline:
         hub: Hub,
         data_dir: Path,
         vmix: VmixOutput | None = None,
+        obs: ObsOutput | None = None,
     ):
         self.store = store
         self.translator = translator
         self.speech = speech
         self.hub = hub
-        self.vmix = vmix
+        self.outputs: list[SubtitleOutput] = [o for o in (vmix, obs) if o is not None]  # streaming software
         self.models_dir = data_dir / "models" / "whisper"
         self.logs_dir = data_dir / "service-logs"
         self.state = "stopped"  # stopped|loading|running
@@ -75,7 +78,7 @@ class Pipeline:
         self._next_id = 1
         self._loop: asyncio.AbstractEventLoop | None = None
         # What the person at the microphone speaks right now; the operator switches it
-        # (e.g. to Russian for a testimony). Read by the recognition thread.
+        # (e.g. for a testimony in another language). Read by the recognition thread.
         self.speaker_language = self.settings.source_language
         self._sentences: asyncio.Queue[tuple[str, float, str]] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
@@ -220,14 +223,14 @@ class Pipeline:
             return
         self.speaker_language = lang  # the recognition thread picks this up
         self._broadcast_status()
-        vmix = self.vmix
-        if vmix is None or not vmix.active:
-            return
-        await vmix.clear()  # a new speaker: don't show the previous one's words
-        if vmix.settings.auto_overlay:
-            # Show the overlay while vMix carries a translation, hide it when the
-            # speaker already speaks the vMix language.
-            await vmix.overlay(lang != self.vmix_language)
+        for output in self.outputs:
+            if not output.active:
+                continue
+            await output.clear()  # a new speaker: don't show the previous one's words
+            if output.settings.auto_overlay:
+                # Show the overlay while it carries a translation, hide it when the
+                # speaker already speaks the language it shows.
+                await output.overlay(lang != self.output_language(output))
 
     def _broadcast_status(self) -> None:
         msg = {"type": "status", "running": self.state == "running", "paused": self.paused}
@@ -355,15 +358,13 @@ class Pipeline:
 
     # -- translation -----------------------------------------------------------
 
-    @property
-    def vmix_language(self) -> str:
-        """The language vMix shows (the main language unless another one is chosen)."""
-        return (self.vmix.settings.language if self.vmix else "") or self.source_language
+    def output_language(self, output: SubtitleOutput) -> str:
+        """The language streaming software shows (the main language unless another one is chosen)."""
+        return output.settings.language or self.source_language
 
     def wanted_languages(self, seg: Segment) -> set[str]:
         wanted = self.hub.active_languages() | self.speech.active_languages()
-        if self.vmix is not None and self.vmix.active:
-            wanted.add(self.vmix_language)
+        wanted |= {self.output_language(output) for output in self.outputs if output.active}
         return wanted - {seg.lang}
 
     async def _translate(self, seg: Segment, lang: str) -> str | None:
@@ -406,11 +407,12 @@ class Pipeline:
                 self._log("translation", id=seg.id, lang=lang, text=translated)
                 self.hub.to_language(lang, {"type": "segment", "id": seg.id, "text": translated, "lang": lang})
                 self.speech.say(lang, translated)
-        if self.vmix is not None and self.vmix.active:
-            target = self.vmix_language
-            text = seg.source if target == seg.lang else dict(zip(langs, results)).get(target)
-            if text:
-                await self.vmix.push(text)
+        for output in self.outputs:
+            if output.active:
+                target = self.output_language(output)
+                text = seg.source if target == seg.lang else dict(zip(langs, results)).get(target)
+                if text:
+                    await output.push(text)
         self.stats["latency_s"] = round(time.time() - created, 2)
 
     def clear_translations(self) -> None:

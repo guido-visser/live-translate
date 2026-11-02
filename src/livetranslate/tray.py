@@ -70,19 +70,17 @@ TEXTS = {
 
 
 def make_icon(state: str, size: int = 64) -> Image.Image:
-    """A coloured circle with a white speech bubble; the colour shows the state."""
-    scale = 4  # draw large and shrink for smooth edges
-    s = size * scale
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.ellipse((0, 0, s - 1, s - 1), fill=COLORS.get(state, COLORS["stopped"]))
+    """The app's icon as drawn for small sizes (packaging/icon/icon-small.svg); the colour shows the state."""
+    u = size * 4 / 96  # on the drawing's grid; draw large and shrink for smooth edges
+    color = COLORS.get(state, COLORS["stopped"])
     white = (255, 255, 255, 255)
-    d.rounded_rectangle((s * 0.22, s * 0.26, s * 0.78, s * 0.62), radius=s * 0.08, fill=white)
-    d.polygon([(s * 0.34, s * 0.60), (s * 0.30, s * 0.76), (s * 0.48, s * 0.60)], fill=white)
-    bar = COLORS.get(state, COLORS["stopped"])
-    for i, width in enumerate((0.40, 0.28)):
-        y = s * (0.36 + i * 0.12)
-        d.rounded_rectangle((s * 0.30, y, s * (0.30 + width), y + s * 0.05), radius=s * 0.025, fill=bar)
+    img = Image.new("RGBA", (size * 4, size * 4), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, 96 * u - 1, 96 * u - 1), radius=20 * u, fill=color)
+    d.rounded_rectangle((12 * u, 12 * u, 84 * u, 66 * u), radius=12 * u, fill=white)
+    d.polygon([(28 * u, 60 * u), (28 * u, 84 * u), (44 * u, 66 * u)], fill=white)
+    for x, y, width, height in ((24, 30, 6, 18), (36, 24, 6, 30), (48, 30, 24, 6), (48, 42, 18, 6)):
+        d.rectangle((x * u, y * u, (x + width) * u - 1, (y + height) * u - 1), fill=color)
     return img.resize((size, size), Image.LANCZOS)
 
 

@@ -6,7 +6,10 @@
   let state = null; // last /api/admin/state
   let status = { state: "stopped", paused: false, error: "" };
   let translator = { status: "stopped", detail: "", needs_restart: false };
-  let vmix = { ok: null, error: "", last_text: "", overlay: null };
+  const streaming = {
+    vmix: { name: "vMix", ok: null, error: "", last_text: "", overlay: null, ready: (s) => s.input && s.field, overlayLabel: "overlay" },
+    obs: { name: "OBS Studio", ok: null, error: "", last_text: "", overlay: null, ready: (s) => s.source, overlayLabel: "obsShow" },
+  };
   let lastTranslatorKey = null;
 
   // -- status & controls -----------------------------------------------------------
@@ -100,7 +103,7 @@
     renderSpeakers();
     try {
       const res = await api("/api/admin/speaker", { method: "POST", body: JSON.stringify({ lang }) });
-      renderVmix(res.vmix);
+      renderStreaming(res);
     } catch (err) {
       $("error").textContent = err.message;
       $("error").hidden = false;
@@ -124,12 +127,9 @@
     if (lang) setSpeaker(lang.code);
   });
 
-  // -- vMix quick panel ------------------------------------------------------------
+  // -- streaming software quick panel ---------------------------------------------------
 
-  function vmixConfigured() {
-    const v = state?.settings.vmix;
-    return Boolean(v && v.input && v.field);
-  }
+  const software = () => state?.settings.main_streaming;
 
   function setSwitch(el, on, disabled) {
     el.setAttribute("aria-checked", String(Boolean(on)));
@@ -137,42 +137,54 @@
     el.disabled = Boolean(disabled);
   }
 
-  function renderVmix(s) {
-    if (s) vmix = s;
-    if (!state) return;
-    const configured = vmixConfigured();
-    setSwitch($("vmixSend"), state.settings.vmix.enabled, !configured);
-    setSwitch($("vmixOverlay"), vmix.overlay === true, !configured);
-    const el = $("vmixStatus");
+  // Takes anything with the programs' statuses under their names: the state, a tick, a response.
+  function renderStreaming(statuses) {
+    for (const name of Object.keys(streaming)) {
+      if (statuses?.[name]) Object.assign(streaming[name], statuses[name]);
+    }
+    const name = software();
+    $("streamPanel").hidden = !streaming[name];
+    if (!streaming[name]) return;
+    const out = streaming[name];
+    const configured = Boolean(out.ready(state.settings[name]));
+    $("streamName").textContent = out.name;
+    $("streamSendLabel").textContent = t("sendToSoftware").replace("{name}", out.name);
+    $("streamOverlayLabel").textContent = t(out.overlayLabel);
+    setSwitch($("streamSend"), state.settings[name].enabled, !configured);
+    setSwitch($("streamOverlay"), out.overlay === true, !configured);
+    const el = $("streamStatus");
     if (!configured) {
       el.className = "small muted";
-      el.textContent = t("vmixNotConfigured");
-    } else if (vmix.ok === true) {
+      el.textContent = t("streamNotConfigured");
+    } else if (out.ok === true) {
       el.className = "small vmix-ok";
       el.textContent = t("vmixOk");
-    } else if (vmix.ok === false) {
+    } else if (out.ok === false) {
       el.className = "small vmix-error";
-      el.textContent = `${t("vmixError")}: ${vmix.error}`;
+      el.textContent = `${t("vmixError")}: ${out.error}`;
     } else {
       el.className = "small muted";
       el.textContent = t("vmixUnknown");
     }
-    $("vmixLast").textContent = vmix.last_text || "";
-    $("vmixLast").hidden = !vmix.last_text;
+    $("streamLast").textContent = out.last_text || "";
+    $("streamLast").hidden = !out.last_text;
+    $("streamLast").scrollTop = $("streamLast").scrollHeight;  // the newest words
   }
 
-  $("vmixSend").addEventListener("click", async () => {
+  $("streamSend").addEventListener("click", async () => {
     const settings = structuredClone(state.settings);
-    settings.vmix.enabled = !settings.vmix.enabled;
+    settings[software()].enabled = !settings[software()].enabled;
     state = await window.LT.saveSettings(settings);
-    renderVmix();
+    renderStreaming();
   });
 
-  $("vmixOverlay").addEventListener("click", async () => {
+  $("streamOverlay").addEventListener("click", async () => {
+    const name = software();
     try {
-      renderVmix(await api("/api/admin/vmix/overlay", { method: "POST", body: JSON.stringify({ on: vmix.overlay !== true }) }));
+      const on = streaming[name].overlay !== true;
+      renderStreaming({ [name]: await api(`/api/admin/${name}/overlay`, { method: "POST", body: JSON.stringify({ on }) }) });
     } catch (err) {
-      renderVmix({ ...vmix, ok: false, error: err.message });
+      renderStreaming({ [name]: { ok: false, error: err.message } });
     }
   });
 
@@ -369,7 +381,11 @@
     status = state.status;
     translator = state.translator;
     renderStatus();
-    renderVmix(state.vmix);
+    renderStreaming(state);
+    if (streaming[software()]) {
+      // OBS can tell whether the text is showing; the switch should start at the truth.
+      api(`/api/admin/${software()}/status`).then((status) => renderStreaming({ [software()]: status })).catch(() => {});
+    }
     renderAudio();
     renderUpdate(state.update);
     $("transcript").textContent = "";
@@ -389,7 +405,7 @@
         status = msg.status;
         translator = msg.translator;
         renderStatus();
-        renderVmix(msg.vmix);
+        renderStreaming(msg);
         renderUpdate(msg.update);
         const key = `${translator.engine}:${translator.status}`;
         if (key !== lastTranslatorKey) {
@@ -413,7 +429,7 @@
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") loadState(); });
 
   let lastCounts = [{}, {}];
-  window.LT.onLanguageChange(() => { renderStatus(); renderVmix(); renderListeners(...lastCounts); renderAudio(); renderUpdate(); });
+  window.LT.onLanguageChange(() => { renderStatus(); renderStreaming(); renderListeners(...lastCounts); renderAudio(); renderUpdate(); });
   window.LT.applyTexts();
   renderListeners();
   loadState();

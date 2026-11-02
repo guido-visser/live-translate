@@ -1,6 +1,6 @@
 [project]
 name = "livetranslate"
-version = "0.1.8"
+version = "0.1.9"
 description = "Local, live translation of church services to listeners' phones"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "httpx>=0.27",
+    "websockets>=14",
     "pydantic>=2.6",
     "platformdirs>=4.0",
     "numpy>=1.26",

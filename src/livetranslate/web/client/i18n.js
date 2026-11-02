@@ -1,6 +1,7 @@
 // Interface text for the listener page. Falls back to English for other languages.
 window.I18N = {
   en: {
+    choose: "Choose your language",
     title: "Live translation",
     waiting: "Waiting for the service to begin…",
     notStarted: "The translation has not started yet.",
@@ -13,6 +14,7 @@ window.I18N = {
     newText: "New text",
   },
   nl: {
+    choose: "Kies je taal",
     title: "Live vertaling",
     waiting: "Wachten tot de dienst begint…",
     notStarted: "De vertaling is nog niet gestart.",
@@ -25,6 +27,7 @@ window.I18N = {
     newText: "Nieuwe tekst",
   },
   ru: {
+    choose: "Выберите язык",
     title: "Синхронный перевод",
     waiting: "Ожидание начала богослужения…",
     notStarted: "Перевод ещё не начался.",
@@ -37,6 +40,7 @@ window.I18N = {
     newText: "Новый текст",
   },
   uk: {
+    choose: "Оберіть мову",
     title: "Синхронний переклад",
     waiting: "Очікування початку богослужіння…",
     notStarted: "Переклад ще не розпочався.",

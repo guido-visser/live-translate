@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Literal
@@ -12,15 +13,40 @@ from platformdirs import user_config_dir, user_data_dir
 from pydantic import BaseModel, Field
 
 APP_NAME = "LiveTranslate"
+LOCATION_FILE = "data-location.txt"
 
 log = logging.getLogger(__name__)
 
 
+def chosen_location() -> Path | None:
+    """The folder picked in the setup window, written by LiveTranslateSetup.ps1. None: the standard one."""
+    try:
+        text = (Path(user_data_dir(APP_NAME, appauthor=False)) / LOCATION_FILE).read_text("utf-16").strip()
+    except (OSError, UnicodeError):
+        return None
+    return Path(text) if text else None
+
+
 def data_dir() -> Path:
-    """Folder for downloaded models, the LibreTranslate environment and logs."""
-    path = Path(user_data_dir(APP_NAME, appauthor=False))
+    """Folder for downloaded models, the LibreTranslate environment and logs: several GB."""
+    path = chosen_location() or Path(user_data_dir(APP_NAME, appauthor=False))
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def keep_downloads_in_data_dir() -> None:
+    """LibreTranslate and Hugging Face otherwise store models and caches in the home folder, on the
+    system drive, whichever folder was picked. Only with a picked folder: on a PC that was set up
+    before, this would download everything again."""
+    location = chosen_location()
+    if location is not None:
+        for name, folder in (
+            ("XDG_DATA_HOME", "shared"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_CONFIG_HOME", "config"),
+            ("HF_HOME", "huggingface"),
+        ):
+            os.environ[name] = str(location / folder)
 
 
 def config_path() -> Path:
@@ -74,6 +100,22 @@ class VmixSettings(BaseModel):
     auto_overlay: bool = True
 
 
+class ObsSettings(BaseModel):
+    """Subtitles sent to a text source in OBS Studio (via its WebSocket server)."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(4455, ge=1, le=65535)
+    password: str = ""
+    source: str = ""  # name of the text source
+    scene: str = ""  # scene with its eye; empty = the scene on air
+    # Language shown in OBS; empty = the main language. Speech in another language is translated.
+    language: str = ""
+    max_chars: int = Field(160, ge=20, le=1000)
+    # On a spoken-language switch: show the text when OBS shows a translation, hide it when it shows the original.
+    auto_overlay: bool = True
+
+
 class RemoteSettings(BaseModel):
     """Listeners over the internet, through an SSH tunnel to a server of your own (see tunnel.py)."""
 
@@ -109,7 +151,8 @@ class GlossaryEntry(BaseModel):
 
 
 def default_glossary() -> list[GlossaryEntry]:
-    """Dutch church words the translation engines tend to get wrong ("gemeente" → municipality).
+    """A start for churches that speak Dutch: words the translation engines tend to get wrong
+    ("gemeente" → municipality). They only apply when Dutch is spoken; other languages start empty.
 
     English only: the English word steers every other language. These English words
     tested best inside Dutch sentences with NLLB ("donations", not "offering" = sacrifice).
@@ -138,12 +181,15 @@ PROFILE_FIELDS = (
 
 
 class Settings(BaseModel):
-    church_name: str = ""  # in full: "Evangeliegemeente De Kandelaar"
-    church_short_name: str = ""  # as people say it: "De Kandelaar"
-    source_language: str = "nl"
-    target_languages: list[str] = Field(default_factory=lambda: ["ru", "uk", "en"])
+    # The first-time wizard was finished; until then nothing is downloaded for languages not chosen yet.
+    setup_done: bool = False
+    church_name: str = ""  # in full
+    church_short_name: str = ""  # other names people use, comma-separated
+    # The first-time wizard asks for these; nothing is assumed about a church's languages.
+    source_language: str = "en"
+    target_languages: list[str] = Field(default_factory=list)
     # Languages offered as quick "spoken language" buttons next to the main language.
-    quick_languages: list[str] = Field(default_factory=lambda: ["ru", "uk"])
+    quick_languages: list[str] = Field(default_factory=list)
     tts_enabled: bool = True
     port: int = 8000
     # Override for the address in the QR code (e.g. when the PC has several networks).
@@ -164,6 +210,8 @@ class Settings(BaseModel):
     auto_start_translation: bool = False
     # Show the operator page in its own window; off = in the browser.
     app_window: bool = True
+    # The cross of that window: ask each time, or the remembered answer.
+    close_action: Literal["ask", "tray", "exit"] = "ask"
     # Don't translate songs: speech is still translated, also with instruments playing.
     skip_singing: bool = True
     song_level: int = Field(default=0, ge=-3, le=3)  # stt.sound.SONG_LEVELS, set in Settings → Church
@@ -173,6 +221,9 @@ class Settings(BaseModel):
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     glossary: list[GlossaryEntry] = Field(default_factory=default_glossary)
     vmix: VmixSettings = Field(default_factory=VmixSettings)
+    obs: ObsSettings = Field(default_factory=ObsSettings)
+    # Which streaming software gets switches on the main screen. Both can send at the same time.
+    main_streaming: Literal["none", "vmix", "obs"] = "none"
     remote: RemoteSettings = Field(default_factory=RemoteSettings)
     audio: AudioSettings = Field(default_factory=AudioSettings)
     asr: AsrSettings = Field(default_factory=AsrSettings)
@@ -187,7 +238,10 @@ class SettingsStore:
     def _load(self) -> Settings:
         if self.path.exists():
             try:
-                return Settings.model_validate(json.loads(self.path.read_text("utf-8")))
+                data = json.loads(self.path.read_text("utf-8"))
+                data.setdefault("setup_done", True)  # set up before the wizard existed
+                data.setdefault("main_streaming", "vmix")  # the main screen always had vMix then
+                return Settings.model_validate(data)
             except Exception:
                 log.exception("Could not read %s, using defaults", self.path)
         return Settings()

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Translate</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/admin/admin.css">
+</head>
+<body class="wizard-page">
+  <main class="wizard card">
+    <div class="wizard-top">
+      <div id="wizardCount" class="muted small"></div>
+      <select id="uiLang" aria-label="Language">
+        <option value="nl">Nederlands</option>
+        <option value="en">English</option>
+        <option value="ru">Русский</option>
+        <option value="uk">Українська</option>
+      </select>
+    </div>
+    <div class="wizard-bar" aria-hidden="true"><div id="wizardFill"></div></div>
+
+    <section data-step="welcome">
+      <img class="wizard-logo" src="/static/icon.png" alt="" width="64" height="64">
+      <h1 data-t="wizWelcome"></h1>
+      <p data-t="wizWelcomeText"></p>
+      <ul class="wizard-points">
+        <li data-t="wizPoint1"></li>
+        <li data-t="wizPoint2"></li>
+        <li data-t="wizPoint3"></li>
+      </ul>
+      <p class="small muted">
+        <span data-t="wizHaveProfile"></span>
+        <label class="wizard-link"><input id="wizProfile" type="file" accept=".json,application/json" hidden><span data-t="profileImport"></span></label>
+        <span id="wizProfileStatus"></span>
+      </p>
+    </section>
+
+    <section data-step="church" hidden>
+      <h1 data-t="wizChurch"></h1>
+      <p data-t="wizChurchText"></p>
+      <div class="row">
+        <label for="wizChurchName" data-t="churchName"></label>
+        <input id="wizChurchName" type="text" data-t-placeholder="churchNameHint">
+      </div>
+      <div class="row">
+        <label for="wizChurchShort" data-t="churchShort"></label>
+        <input id="wizChurchShort" type="text" data-t-placeholder="churchShortHint">
+      </div>
+    </section>
+
+    <section data-step="spoken" hidden>
+      <h1 data-t="wizSpoken"></h1>
+      <p data-t="wizSpokenText"></p>
+      <input id="wizSpokenSearch" class="lang-search" type="search" data-t-placeholder="searchLanguages" aria-label="Search">
+      <div id="wizSpokenList" class="wizard-list" role="radiogroup"></div>
+      <p id="wizSpokenNone" class="muted small" data-t="searchNone" hidden></p>
+      <details class="wizard-more">
+        <summary data-t="wizOtherSpoken"></summary>
+        <p class="muted small" data-t="wizOtherSpokenText"></p>
+        <input id="wizQuickSearch" class="lang-search" type="search" data-t-placeholder="searchLanguages" aria-label="Search">
+        <div id="wizQuickList" class="wizard-list"></div>
+      </details>
+    </section>
+
+    <section data-step="listeners" hidden>
+      <h1 data-t="wizListeners"></h1>
+      <p data-t="wizListenersText"></p>
+      <input id="wizTargetsSearch" class="lang-search" type="search" data-t-placeholder="searchLanguages" aria-label="Search">
+      <div id="wizTargetsList" class="wizard-list"></div>
+      <p id="wizTargetsNone" class="muted small" data-t="searchNone" hidden></p>
+      <p id="wizChosen" class="wizard-chosen"></p>
+      <label class="check"><input id="wizTts" type="checkbox"> <span data-t="wizTts"></span></label>
+      <details class="wizard-more">
+        <summary data-t="engine"></summary>
+        <label class="check"><input type="radio" name="wizEngine" value="nllb"> <span data-t="wizEngineNllb"></span></label>
+        <label class="check"><input type="radio" name="wizEngine" value="libretranslate"> <span data-t="wizEngineLibre"></span></label>
+      </details>
+    </section>
+
+    <section data-step="audio" hidden>
+      <h1 data-t="wizAudio"></h1>
+      <p data-t="wizAudioText"></p>
+      <div class="seg-control" role="radiogroup">
+        <label><input type="radio" name="wizKind" value="device"><span data-t="kindDevice"></span></label>
+        <label><input type="radio" name="wizKind" value="loopback"><span data-t="kindLoopback"></span></label>
+      </div>
+      <div class="row">
+        <label for="wizDevice" data-t="device"></label>
+        <select id="wizDevice"></select>
+      </div>
+      <div class="row">
+        <label for="wizChannel" data-t="channel"></label>
+        <select id="wizChannel"></select>
+      </div>
+      <p class="muted small" data-t="wizAudioLater"></p>
+    </section>
+
+    <section data-step="streaming" hidden>
+      <h1 data-t="wizStreaming"></h1>
+      <p data-t="wizStreamingText"></p>
+      <div class="wizard-list wizard-choices" role="radiogroup">
+        <label class="wizard-item"><input type="radio" name="wizStream" value="none"> <span data-t="wizStreamNone"></span></label>
+        <label class="wizard-item"><input type="radio" name="wizStream" value="vmix"> <span>vMix</span></label>
+        <label class="wizard-item"><input type="radio" name="wizStream" value="obs"> <span>OBS Studio</span></label>
+      </div>
+      <p class="muted small" data-t="wizStreamingLater"></p>
+    </section>
+
+    <section data-step="extras" hidden>
+      <h1 data-t="wizExtras"></h1>
+      <p data-t="wizExtrasText"></p>
+      <div id="wizWindowsOnly">
+        <label class="check"><input id="wizStartWindows" type="checkbox"> <span data-t="startWithWindows"></span></label>
+      </div>
+      <label class="check"><input id="wizAutoStart" type="checkbox"> <span data-t="autoStartTranslation"></span></label>
+      <div class="row">
+        <label for="wizWifi" data-t="wifi"></label>
+        <input id="wizWifi" type="text">
+      </div>
+      <p class="muted small" data-t="wizWifiHelp"></p>
+    </section>
+
+    <section data-step="prepare" hidden>
+      <h1 id="wizPrepareTitle"></h1>
+      <p id="wizPrepareText"></p>
+      <div id="wizPrepareRows" class="wizard-rows"></div>
+      <div id="wizTips" class="wizard-tips" hidden>
+        <p data-t="wizTip1"></p>
+        <p data-t="wizTip2"></p>
+      </div>
+    </section>
+
+    <div class="wizard-foot">
+      <button id="wizBack" type="button" data-t="wizBack"></button>
+      <span class="wizard-space"></span>
+      <span id="wizError" class="error small" hidden></span>
+      <button id="wizSkip" type="button" data-t="wizSkip"></button>
+      <button id="wizNext" class="primary" type="button"></button>
+    </div>
+  </main>
+
+  <script src="/admin/defaults.js"></script>
+  <script src="/static/admin/i18n.js"></script>
+  <script src="/static/admin/common.js"></script>
+  <script src="/static/admin/setup.js"></script>
+</body>
+</html>

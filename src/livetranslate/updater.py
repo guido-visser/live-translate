@@ -12,6 +12,7 @@ import hashlib
 import logging
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -151,6 +152,15 @@ class Updater:
         partial.replace(target)
         self.progress = 1.0
         return target
+
+
+def start_data_move(folder: Path) -> None:
+    """Hand over to the setup window. The app runs from the data folder, so it has to close for this."""
+    subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+         "-File", str(folder / "LiveTranslateSetup.ps1"), "-Move"],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
 
 
 def release_info(release: dict) -> dict:

@@ -17,7 +17,7 @@ LANGUAGES = [
 @pytest.fixture
 def client(tmp_path):
     store = SettingsStore(tmp_path / "settings.json")
-    store.save(Settings(target_languages=["ru", "uk"], tts_enabled=False))
+    store.save(Settings(source_language="nl", target_languages=["ru", "uk"], quick_languages=["ru", "uk"], tts_enabled=False))
     app = create_app(store, tmp_path, manage_translator=False)
     services = app.state.services
     libre, nllb = services.translator.libre, services.translator.nllb
@@ -282,3 +282,26 @@ def test_static_files_are_checked_before_reuse(client):
     assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
     again = client.get("/static/admin/i18n.js", headers={"If-None-Match": r.headers["etag"]})
     assert again.status_code == 304
+
+
+def test_closing_the_window_asks_until_a_choice_is_remembered(client):
+    assert client.get("/api/admin/close").json() == {"action": "ask"}
+    assert client.post("/api/admin/close", json={"action": "tray", "remember": False}).status_code == 200
+    assert client.get("/api/admin/close").json() == {"action": "ask"}
+    assert client.post("/api/admin/close", json={"action": "tray", "remember": True}).status_code == 200
+    assert client.get("/api/admin/close").json() == {"action": "tray"}
+    assert client.post("/api/admin/close", json={"action": "nonsense", "remember": True}).status_code == 400
+    assert client.get("/api/admin/close").json() == {"action": "tray"}
+
+
+def test_stop_and_exit_closes_the_app_but_keep_running_does_not(client):
+    exits = []
+    client.services.updater.request_exit = lambda: exits.append(True)
+    client.post("/api/admin/close", json={"action": "tray", "remember": False})
+    time.sleep(0.7)
+    client.get("/api/public")  # the app's loop runs the delayed exit
+    assert exits == []
+    client.post("/api/admin/close", json={"action": "exit", "remember": False})
+    time.sleep(0.7)
+    client.get("/api/public")
+    assert exits == [True]

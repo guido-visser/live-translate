@@ -94,8 +94,10 @@ def main() -> None:
     console = ensure_streams()
 
     from . import autostart
-    from .config import SettingsStore, data_dir
+    from .config import SettingsStore, data_dir, keep_downloads_in_data_dir
     from .window import open_page
+
+    keep_downloads_in_data_dir()  # before anything reads these, and LibreTranslate inherits them
 
     parser = argparse.ArgumentParser(prog="livetranslate", description="Live translation of church services")
     parser.add_argument("--port", type=int, help="web server port (default from settings: 8000)")

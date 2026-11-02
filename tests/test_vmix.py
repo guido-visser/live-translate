@@ -93,7 +93,7 @@ async def test_unreachable_vmix_is_reported_not_raised():
     out = make_output(FakeVmix(fail=True))
     await out.push("Hallo")
     assert out.status["ok"] is False and "refused" in out.status["error"]
-    assert await out.inputs() is None
+    assert await out.state() is None
 
 
 async def test_inactive_output_sends_nothing():

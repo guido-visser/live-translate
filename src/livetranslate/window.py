@@ -26,10 +26,14 @@ from urllib.parse import urlsplit
 log = logging.getLogger(__name__)
 
 TITLE = "Live Translate"
-ICON = Path(__file__).parent / "web" / "icon.png"
+ICON = Path(__file__).parent / "web" / "icon.ico"
 STARTUP_S = 5  # a window process that ends this fast didn't get a window up
+ASK_TIMEOUT_S = 3  # a page that doesn't answer in time can't ask anything
+ASK = "!!(window.LT && LT.askClose && (LT.askClose(), true))"
+SM_SHUTTINGDOWN = 0x2000
 SERVER_CHECK_S = 5
-WIDTH, HEIGHT = 1180, 860  # until the window has been closed once
+WIDTH, HEIGHT = 1180, 1040  # until the window has been closed once; the main screen fits without scrolling
+OLD_DEFAULT = (1180, 860)  # remembered by earlier versions without anyone choosing it
 MIN_SIZE = (420, 500)
 SW_SHOWMINIMIZED, SW_SHOWMAXIMIZED = 2, 3
 WPF_RESTORETOMAXIMIZED = 2
@@ -75,13 +79,8 @@ def _claim(title: str) -> bool:
     return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
 
 
-def _set_icon(title: str, data: Path) -> None:
+def _set_icon(title: str) -> None:
     """Without this the window and its taskbar button show the Python icon."""
-    from PIL import Image
-
-    path = data / "window.ico"
-    if not path.exists():
-        Image.open(ICON).save(path, sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
     user32 = ctypes.windll.user32
     user32.FindWindowW.restype = ctypes.c_void_p
     user32.LoadImageW.restype = ctypes.c_void_p
@@ -89,7 +88,7 @@ def _set_icon(title: str, data: Path) -> None:
     user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
     hwnd = user32.FindWindowW(None, title)
     for which, size in ((0, 16), (1, 32)):  # WM_SETICON: ICON_SMALL, ICON_BIG
-        icon = user32.LoadImageW(None, str(path), 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+        icon = user32.LoadImageW(None, str(ICON), 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
         user32.SendMessageW(hwnd, 0x80, which, icon)
 
 
@@ -101,6 +100,8 @@ def load_state(path: Path, title: str) -> dict:
         state.update(width=int(saved["width"]), height=int(saved["height"]), maximized=bool(saved["maximized"]))
     except (OSError, ValueError, KeyError, TypeError):
         pass  # never opened yet, or a damaged file: the default is fine
+    if (state["width"], state["height"]) == OLD_DEFAULT:
+        state.update(width=WIDTH, height=HEIGHT)
     return state
 
 
@@ -189,7 +190,38 @@ def _restore_to_maximized(title: str) -> None:
         ctypes.windll.user32.SetWindowPlacement(hwnd, ctypes.byref(placement))
 
 
-def _close_with_the_app(window, url: str) -> None:
+class _WindowApi:
+    """What the question on the page can ask of this window; see LT.askClose in common.js."""
+
+    def __init__(self, show, close):
+        self._show, self._close = show, close
+
+    def show_window(self) -> None:
+        self._show()
+
+    def close_window(self) -> None:
+        self._close()
+
+
+def _ask_before_closing(window, close) -> None:
+    """The page asks and then closes the window itself. Without a page that can (a dead server, a
+    page still loading) the window just closes: the app stays in the tray, and nothing is lost."""
+    answer = []
+
+    def ask() -> None:
+        try:
+            answer.append(window.evaluate_js(ASK))
+        except Exception:
+            log.warning("Could not ask before closing", exc_info=True)
+
+    asking = threading.Thread(target=ask, daemon=True)
+    asking.start()
+    asking.join(ASK_TIMEOUT_S)
+    if not (answer and answer[0]):
+        close()
+
+
+def _close_with_the_app(close, url: str) -> None:
     """The app is gone (Exit in the tray, an update): don't leave a dead page on the screen."""
     parts = urlsplit(url)
     probe = f"{parts.scheme}://{parts.netloc}/api/public"
@@ -201,7 +233,7 @@ def _close_with_the_app(window, url: str) -> None:
             failures = 0
         except (urllib.error.URLError, OSError):
             failures += 1
-    window.destroy()
+    close()
 
 
 def main() -> int:
@@ -222,6 +254,12 @@ def main() -> int:
     state = load_state(state_file, title)
     minimized = "--minimized" in sys.argv
     x, y, width, height = centered(state["width"], state["height"], _work_area())
+    closing_now = threading.Event()
+
+    def close_now() -> None:
+        closing_now.set()
+        window.destroy()
+
     window = webview.create_window(
         title,
         url,
@@ -233,16 +271,26 @@ def main() -> int:
         text_select=True,
         minimized=minimized,
         maximized=state["maximized"] and not minimized,  # pywebview would ignore minimized
+        js_api=_WindowApi(lambda: _bring_to_front(title), close_now),
     )
 
     def on_shown() -> None:
-        _set_icon(title, data)
+        _set_icon(title)
         if minimized and state["maximized"]:
             _restore_to_maximized(title)
 
     window.events.shown += on_shown
-    window.events.closing += lambda: _remember(state_file, title)
-    threading.Thread(target=_close_with_the_app, args=(window, url), daemon=True).start()
+
+    def on_closing() -> bool:
+        # Windows shutting down can't wait for an answer.
+        if closing_now.is_set() or ctypes.windll.user32.GetSystemMetrics(SM_SHUTTINGDOWN):
+            _remember(state_file, title)
+            return True
+        threading.Thread(target=_ask_before_closing, args=(window, close_now), daemon=True).start()
+        return False
+
+    window.events.closing += on_closing
+    threading.Thread(target=_close_with_the_app, args=(close_now, url), daemon=True).start()
     # Not private: the pages remember the interface language and panels in localStorage.
     webview.start(private_mode=False, storage_path=str(data / "webview"))
     return 0

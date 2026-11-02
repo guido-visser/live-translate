@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scan voor vertaling</title>
+  <title>Live Translate</title>
   <link rel="icon" type="image/png" href="/static/icon.png">
   <style>
     :root { color-scheme: light; }
@@ -23,7 +23,7 @@
 </head>
 <body>
   <main>
-    <h1>Vertaling · Переклад · Перевод · Translation</h1>
+    <h1 id="heading">🌐 Live Translate</h1>
     <img id="qr" src="/api/qr.svg" alt="QR code">
     <div class="url" id="url"></div>
     <div class="wifi" id="wifi"></div>
@@ -31,6 +31,8 @@
   </main>
   <script>
     fetch("/api/public").then((r) => r.json()).then((info) => {
+      // The languages below are each written in their own language, so everyone can see theirs.
+      if (info.church) document.getElementById("heading").textContent = `🌐 ${info.church}`;
       document.getElementById("url").textContent = info.url.replace(/^https?:\/\//, "").replace(/\/$/, "");
       document.getElementById("wifi").textContent = info.wifi ? `📶 Wi-Fi: ${info.wifi}` : "";
       document.getElementById("langs").textContent = info.languages.map((l) => l.name).join(" · ");

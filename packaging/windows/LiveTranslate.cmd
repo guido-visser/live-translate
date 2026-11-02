@@ -5,16 +5,17 @@ setlocal
 title Live Translate
 set "APP=%~dp0"
 
-rem Never run elevated (e.g. started from the installer): an elevated uv refuses
-rem the Python folder links it made as the normal user ("untrusted mount point",
-rem os error 448). fltmc only succeeds as admin; explorer restarts us unelevated.
+rem Never run elevated: the app's data belongs to the normal user. fltmc only
+rem succeeds as admin; explorer restarts us unelevated.
 fltmc >nul 2>&1
 if not errorlevel 1 (
     explorer.exe "%APP%LiveTranslate.vbs"
     exit /b 0
 )
 
+rem Keep in step with LiveTranslateSetup.ps1. LIVETRANSLATE_DATA: the folder picked in the setup window.
 set "DATA=%LOCALAPPDATA%\LiveTranslate"
+if defined LIVETRANSLATE_DATA set "DATA=%LIVETRANSLATE_DATA%"
 set "UV=%APP%bin\uv.exe"
 set "UV_PROJECT_ENVIRONMENT=%DATA%\venv"
 set "UV_PYTHON_INSTALL_DIR=%DATA%\python"

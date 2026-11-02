@@ -38,6 +38,10 @@ class TranslationService:
         return self.active.languages
 
     @property
+    def catalog(self) -> list[str]:
+        return self.active.catalog
+
+    @property
     def needs_restart(self) -> bool:
         return self.active.needs_restart
 

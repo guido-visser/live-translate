@@ -19,9 +19,16 @@ from ..native import ACCESS_VIOLATION, runtime_hint
 log = logging.getLogger(__name__)
 
 PIVOT = "en"  # Argos models mostly go through English
+# Everything the Argos index offers. Only the chosen languages get loaded, so the server can't
+# be asked for this list: it answers with what is loaded now.
+CATALOG = (
+    "ar az bg bn ca cs da de el en eo es et eu fa fi fr ga gl he hi hu id it ja ko ky lt lv ms "
+    "nb nl pl pt ro ru sk sl sq sv sw th tl tr uk ur vi zh zt"
+).split()
 # Written once the environment is fully installed; an interrupted install leaves
 # libretranslate.exe behind without it, and is then installed again.
 INSTALLED_MARKER = ".livetranslate-installed"
+MODELS_MARKER = ".livetranslate-models"  # the language codes models were fetched for
 
 
 def _venv_exe(env: Path, name: str) -> Path:
@@ -87,6 +94,9 @@ class LibreTranslate:
             "--load-only", ",".join(self.wanted),
             "--disable-web-ui",
         ]
+        # By itself it only fetches models on its very first start, so a language added later wouldn't work.
+        if set(self.wanted) - self._models_installed():
+            args.append("--update-models")
         log.info("Starting %s", " ".join(args))
         log_file = open(self.log_path, "ab")
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -102,6 +112,18 @@ class LibreTranslate:
         self._proc = subprocess.Popen(args, stdout=log_file, stderr=subprocess.STDOUT, creationflags=flags, env=env)
         self._loaded = self.wanted
         await self._wait_ready(timeout=1800)
+
+    def _models_installed(self) -> set[str]:
+        try:
+            return set((self.env_dir / MODELS_MARKER).read_text("utf-8").split())
+        except OSError:
+            return set()
+
+    def _remember_models(self) -> None:
+        """What the server says it has: without internet a new language isn't there, and gets another try."""
+        if self.env_dir.exists():
+            have = self._models_installed() | {lang["code"] for lang in self.languages}
+            (self.env_dir / MODELS_MARKER).write_text(" ".join(sorted(have)), "utf-8")
 
     async def _ensure_installed(self) -> Path:
         # Always our own environment: a libretranslate found on PATH may belong to a
@@ -156,6 +178,7 @@ class LibreTranslate:
                 raise RuntimeError(self._exit_message(self._proc.returncode))
             if await self._ping():
                 await self._fetch_languages()
+                self._remember_models()
                 self.status, self.detail = "ready", ""
                 log.info("LibreTranslate ready with %d languages", len(self.languages))
                 return
@@ -197,6 +220,11 @@ class LibreTranslate:
         await self._client.aclose()
 
     # -- translation -----------------------------------------------------------
+
+    @property
+    def catalog(self) -> list[str]:
+        """The languages that can be chosen, loaded or not."""
+        return [lang["code"] for lang in self.languages] if self.external_url else list(CATALOG)
 
     def targets_for(self, source: str) -> list[str]:
         for lang in self.languages:

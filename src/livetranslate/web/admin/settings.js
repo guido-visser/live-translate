@@ -7,12 +7,13 @@
   let state = null;
   let devices = [];
   let vmixState = null; // inputs reported by vMix
+  let obsState = null; // text sources and scenes reported by OBS
   let glossary = []; // every glossary entry (all spoken languages), edited in place
   let dirty = false;
 
   // -- tabs --------------------------------------------------------------------------
 
-  const tabs = [...document.querySelectorAll("[role=tab]")];
+  const tabs = [...document.querySelectorAll("[role=tab][data-tab]")];
 
   function showTab(name) {
     if (!tabs.some((b) => b.dataset.tab === name)) name = tabs[0].dataset.tab;
@@ -23,6 +24,7 @@
     });
     document.querySelectorAll(".tab-panel").forEach((p) => (p.hidden = p.dataset.panel !== name));
     history.replaceState(null, "", `${location.pathname}${location.search}#${name}`);
+    if (name === "about" && state?.settings.check_updates && !state.update.latest) $("checkNow").click();
   }
 
   tabs.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -85,12 +87,32 @@
     }
   }
 
+  // Only hides rows: a ticked language that doesn't match the search stays ticked.
+  function filterList(box, search, empty) {
+    let shown = 0;
+    box.querySelectorAll("label").forEach((label) => {
+      const match = window.LT.languageMatches(label.querySelector("input").value, search.value);
+      label.hidden = !match;
+      if (match) shown++;
+    });
+    empty.hidden = shown > 0;
+  }
+
+  const filterTargets = () => filterList($("targets"), $("targetsSearch"), $("targetsNone"));
+  const filterQuick = () => filterList($("quick"), $("quickSearch"), $("quickNone"));
+  $("targetsSearch").addEventListener("input", filterTargets);
+  $("quickSearch").addEventListener("input", filterQuick);
+  for (const search of [$("targetsSearch"), $("quickSearch")]) {
+    search.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });  // don't save the form
+  }
+
   function renderTargets() {
     const s = state.settings;
     const main = $("sourceLang").value;
     const codes = state.target_languages.length ? state.target_languages.map((l) => l.code) : s.target_languages;
     const tts = new Set(state.tts_languages);
     checkList($("targets"), codes.filter((c) => c !== main), new Set(s.target_languages), (c) => (tts.has(c) ? " 🔊" : ""));
+    filterTargets();
   }
 
   function renderQuick() {
@@ -102,8 +124,10 @@
     const fixed = document.createElement("label");
     fixed.className = "check";
     fixed.innerHTML = '<input type="checkbox" checked disabled> <span></span>';
+    fixed.querySelector("input").value = main;
     fixed.querySelector("span").textContent = `${langName(main)} (${t("quickMain")})`;
     box.prepend(fixed);
+    filterQuick();
   }
 
   function renderSourceLanguages() {
@@ -115,7 +139,7 @@
     src.value = wanted;
   }
 
-  $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); renderVmixLanguages(); renderGlossary(); });
+  $("sourceLang").addEventListener("change", () => { renderTargets(); renderQuick(); renderVmixLanguages(); renderObsLanguages(); renderGlossary(); });
   $("engine").addEventListener("change", () => ($("nllbRows").hidden = $("engine").value !== "nllb"));
 
   // -- glossary --------------------------------------------------------------------------
@@ -336,6 +360,78 @@
     }
   });
 
+  // -- OBS Studio ------------------------------------------------------------------------
+
+  const subtabs = [...document.querySelectorAll("[data-subtab]")];
+
+  function showSubtab(name) {
+    subtabs.forEach((b) => {
+      b.classList.toggle("active", b.dataset.subtab === name);
+      b.setAttribute("aria-selected", String(b.dataset.subtab === name));
+    });
+    document.querySelectorAll("[data-subpanel]").forEach((p) => (p.hidden = p.dataset.subpanel !== name));
+  }
+
+  subtabs.forEach((b) => b.addEventListener("click", () => showSubtab(b.dataset.subtab)));
+
+  // What is saved stays listed while OBS is closed, so opening this page doesn't lose it.
+  function fillObsList(select, names, wanted, first) {
+    select.textContent = "";
+    select.appendChild(new Option(first, ""));
+    for (const name of names) select.appendChild(new Option(name, name));
+    if (wanted && !names.includes(wanted)) select.appendChild(new Option(wanted, wanted));
+    select.value = wanted || "";
+  }
+
+  function renderObsLists() {
+    const s = state.settings.obs;
+    fillObsList($("obsSource"), obsState?.inputs || [], $("obsSource").value || s.source, "—");
+    fillObsList($("obsScene"), obsState?.scenes || [], $("obsScene").value || s.scene, t("obsSceneLive"));
+  }
+
+  function renderObsLanguages() {
+    const select = $("obsLanguage");
+    const wanted = select.value || state.settings.obs.language || "";
+    const main = $("sourceLang").value;
+    select.textContent = "";
+    select.appendChild(new Option(`${langName(main)} (${t("quickMain")})`, ""));
+    for (const code of sortByName(state.settings.target_languages.filter((c) => c !== main))) {
+      select.appendChild(new Option(langName(code), code));
+    }
+    if (wanted && ![...select.options].some((o) => o.value === wanted)) select.appendChild(new Option(langName(wanted), wanted));
+    select.value = wanted === main ? "" : wanted;
+  }
+
+  function showObsStatus(ok, message) {
+    const el = $("obsStatus");
+    el.className = `small ${ok ? "vmix-ok" : "vmix-error"}`;
+    el.textContent = ok ? t("vmixOk") : `${t("vmixError")}: ${message}`;
+  }
+
+  async function refreshObs() {
+    const s = state.settings.obs;
+    if ($("obsHost").value.trim() !== s.host || Number($("obsPort").value) !== s.port || $("obsPassword").value !== s.password) await save();
+    try {
+      obsState = await api("/api/admin/obs/inputs");
+      showObsStatus(true);
+    } catch (err) {
+      obsState = null;
+      showObsStatus(false, err.message);
+    }
+    renderObsLists();
+  }
+
+  $("obsRefresh").addEventListener("click", refreshObs);
+  $("obsTest").addEventListener("click", async () => {
+    if (dirty) await save();
+    try {
+      await api("/api/admin/obs/test", { method: "POST", body: JSON.stringify({ text: t("vmixTestText") }) });
+      showObsStatus(true);
+    } catch (err) {
+      showObsStatus(false, err.message);
+    }
+  });
+
   // -- network ---------------------------------------------------------------------------
 
   function renderAddresses() {
@@ -474,13 +570,26 @@
     $("vmixMaxChars").value = s.vmix.max_chars;
     $("vmixAuto").checked = s.vmix.auto_overlay;
     renderVmixInputs();
+    $("mainStreaming").value = s.main_streaming;
+    showSubtab(s.main_streaming === "obs" ? "obs" : "vmix");
+    $("obsEnabled").checked = s.obs.enabled;
+    $("obsHost").value = s.obs.host;
+    $("obsPort").value = s.obs.port;
+    $("obsPassword").value = s.obs.password;
+    $("obsSource").value = s.obs.source;
+    $("obsScene").value = s.obs.scene;
+    renderObsLists();
+    $("obsLanguage").value = s.obs.language;
+    renderObsLanguages();
+    $("obsMaxChars").value = s.obs.max_chars;
+    $("obsAuto").checked = s.obs.auto_overlay;
 
     renderAddresses();
     $("wifi").value = s.wifi_name;
     $("pin").value = s.admin_pin;
     $("port").value = s.port;
     $("checkUpdates").checked = s.check_updates;
-    $("windowsOnly").hidden = $("appWindowRow").hidden = !state.windows;
+    $("windowsOnly").hidden = $("appWindowRow").hidden = $("closeActionRow").hidden = !state.windows;
     $("churchName").value = s.church_name;
     $("churchShort").value = s.church_short_name;
     $("startWithWindows").checked = s.start_with_windows;
@@ -489,8 +598,11 @@
     $("logEnabled").checked = s.service_log.enabled;
     $("logAudio").checked = s.service_log.audio;
     $("logFolder").textContent = state.logs_folder;
+    $("dataFolder").textContent = state.data_folder;
+    $("moveRow").hidden = !state.can_move_data;
     $("autoStartTranslation").checked = s.auto_start_translation;
     $("appWindow").checked = s.app_window;
+    $("closeAction").value = s.close_action;
     $("remoteEnabled").checked = s.remote.enabled;
     $("remoteUrl").value = s.remote.public_url;
     $("remoteHost").value = s.remote.ssh_host;
@@ -530,6 +642,16 @@
     s.vmix.language = $("vmixLanguage").value;
     s.vmix.max_chars = Math.max(20, Math.min(1000, Number($("vmixMaxChars").value) || 160));
     s.vmix.auto_overlay = $("vmixAuto").checked;
+    s.main_streaming = $("mainStreaming").value;
+    s.obs.enabled = $("obsEnabled").checked;
+    s.obs.host = $("obsHost").value.trim() || "127.0.0.1";
+    s.obs.port = Number($("obsPort").value) || 4455;
+    s.obs.password = $("obsPassword").value;
+    s.obs.source = $("obsSource").value;
+    s.obs.scene = $("obsScene").value;
+    s.obs.language = $("obsLanguage").value;
+    s.obs.max_chars = Math.max(20, Math.min(1000, Number($("obsMaxChars").value) || 160));
+    s.obs.auto_overlay = $("obsAuto").checked;
 
     s.public_host = $("address").value === "__custom" ? "" : $("address").value;
     s.wifi_name = $("wifi").value.trim();
@@ -544,6 +666,7 @@
     s.service_log.audio = $("logAudio").checked;
     s.auto_start_translation = $("autoStartTranslation").checked;
     s.app_window = $("appWindow").checked;
+    s.close_action = $("closeAction").value;
     const r = remoteFromForm();
     s.remote.enabled = $("remoteEnabled").checked;
     s.remote.public_url = r.url;
@@ -558,19 +681,8 @@
 
   // -- church --------------------------------------------------------------------------------
 
-  // "De Kandelaar" is also said as "de Kandelaar" and "Kandelaar".
-  function nameForms(name) {
-    const match = name.match(/^(De|Het)\s+(.+)$/i);
-    return match ? [name, `${match[1].toLowerCase()} ${match[2]}`, match[2]] : [name];
-  }
-
-  // Glossary rows with the English word the same as the name: that keeps a name from being translated.
   $("churchProtect").addEventListener("click", () => {
-    const main = $("sourceLang").value;
-    for (const name of [$("churchName").value.trim(), $("churchShort").value.trim()]) {
-      const known = glossary.some((e) => e.lang === main && e.term.split(",").map((f) => f.trim()).includes(name));
-      if (name && !known) glossary.push({ lang: main, term: nameForms(name).join(", "), translations: { en: name } });
-    }
+    window.LT.protectNames(glossary, $("sourceLang").value, $("churchName").value, $("churchShort").value);
     markDirty();
     renderGlossary();
     showTab("glossary");
@@ -759,6 +871,7 @@
   function renderUpdate() {
     const u = state.update;
     $("version").textContent = u.current;
+    $("versionLatest").textContent = u.latest || "–";
     const el = $("updateStatus");
     el.textContent = "";
     if (u.state === "checking") el.textContent = "…";
@@ -786,6 +899,26 @@
     }
   });
 
+  $("setupAgain").addEventListener("click", async () => {
+    await api("/api/admin/setup/again", { method: "POST" });
+    dirty = false;
+    location.href = withPin("/admin/setup?again=1");
+  });
+
+  $("moveData").addEventListener("click", async () => {
+    if (!confirm(t("aboutMoveConfirm"))) return;
+    $("moveStatus").className = "small";
+    try {
+      await api("/api/admin/data/move", { method: "POST" });
+      dirty = false;
+      $("moveData").disabled = true;
+      $("moveStatus").textContent = t("aboutMoveStarted");
+    } catch (err) {
+      $("moveStatus").className = "small error";
+      $("moveStatus").textContent = err.message;
+    }
+  });
+
   function markDirty() {
     dirty = true;
     $("saved").hidden = true;
@@ -805,8 +938,8 @@
     $("saved").hidden = false;
   }
 
-  // The test sentence is not a setting, and calibrating saves its own.
-  const isSetting = (e) => e.target.id !== "glossarySample" && !e.target.closest("#calibration");
+  // The test sentence and the search fields are not settings, and calibrating saves its own.
+  const isSetting = (e) => e.target.id !== "glossarySample" && e.target.type !== "search" && !e.target.closest("#calibration");
   form.addEventListener("input", (e) => isSetting(e) && markDirty());
   form.addEventListener("change", (e) => isSetting(e) && markDirty());
   form.addEventListener("submit", (e) => { e.preventDefault(); save(); });
@@ -840,6 +973,8 @@
     renderAddresses();
     renderTunnel();
     renderVmixLanguages();
+    renderObsLanguages();
+    renderObsLists();
     renderGlossary();
     renderUpdate();
     renderCalibration();
@@ -851,6 +986,8 @@
     devices = d;
     fill();
     if (state.settings.vmix.enabled || state.settings.vmix.input) refreshVmix();
+    if (state.settings.obs.enabled || state.settings.obs.source) refreshObs();
+    if (location.hash === "#about") showTab("about");  // now that it knows the version
   });
   connect();
 })();

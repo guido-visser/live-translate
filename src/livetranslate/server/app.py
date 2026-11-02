@@ -11,12 +11,14 @@ import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import autostart, calibration
+from .. import __version__, autostart, calibration
 from ..audio.devices import list_all
 from ..config import PROFILE_FIELDS, Settings, SettingsStore, data_dir as default_data_dir
+from ..firstrun import Preparation
+from ..integrations.obs import ObsOutput
 from ..integrations.vmix import VmixOutput
 from ..languages import RTL, native_name, ui_language
 from ..native import onnxruntime_error
@@ -24,9 +26,9 @@ from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..stt.sound import SONG_LEVELS
 from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
-from ..tts.piper import SpeechService
+from ..tts.piper import VOICES, SpeechService
 from ..tunnel import Tunnel
-from ..updater import Updater
+from ..updater import Updater, install_dir, start_data_move
 from .hub import Connection, Hub
 from .network import GpuStats, lan_addresses, listener_url, qr_svg
 
@@ -84,10 +86,12 @@ class Services:
         self.speech = SpeechService(data / "models" / "piper")
         self.speech.enabled = store.settings.tts_enabled
         self.vmix = VmixOutput(lambda: store.settings)
-        self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data, self.vmix)
+        self.obs = ObsOutput(lambda: store.settings)
+        self.pipeline = Pipeline(store, self.translator, self.speech, self.hub, data, self.vmix, self.obs)
         self.gpu = GpuStats()
         self.updater = Updater(data, lambda: self.pipeline.state == "stopped")
         self.tunnel = Tunnel(data, store.settings.remote.local_port)
+        self.preparation = Preparation(self)
 
     @property
     def settings(self) -> Settings:
@@ -134,10 +138,11 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         tasks = [asyncio.create_task(_admin_ticker(services))]
         if manage_translator:
             tasks.append(asyncio.create_task(_check_native(services)))
-            tasks.append(asyncio.create_task(_start_translator(services)))
             tasks.append(asyncio.create_task(services.updater.run_checks(lambda: services.settings.check_updates)))
-            if services.settings.auto_start_translation:
-                tasks.append(asyncio.create_task(_auto_start(services)))
+            if services.settings.setup_done:  # otherwise the wizard starts these when it has the choices
+                tasks.append(asyncio.create_task(_start_translator(services)))
+                if services.settings.auto_start_translation:
+                    tasks.append(asyncio.create_task(_auto_start(services)))
             await services.tunnel.apply(services.settings.remote)
         yield
         for task in tasks:
@@ -146,6 +151,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         await services.pipeline.stop()
         await services.translator.close()
         await services.vmix.close()
+        await services.obs.close()
 
     app = FastAPI(title="Live Translate", lifespan=lifespan)
     app.state.services = services
@@ -175,7 +181,18 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             require_admin(request)
         except HTTPException as exc:
             return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+        if not services.settings.setup_done:
+            query = request.url.query
+            return RedirectResponse(f"/admin/setup?{query}" if query else "/admin/setup", status_code=307)
         return FileResponse(WEB / "admin" / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/admin/setup", include_in_schema=False)
+    async def setup_page(request: Request):
+        try:
+            require_admin(request)
+        except HTTPException as exc:
+            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+        return FileResponse(WEB / "admin" / "setup.html", headers={"Cache-Control": "no-cache"})
 
     @app.get("/admin/settings", include_in_schema=False)
     async def settings_page(request: Request):
@@ -206,6 +223,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         return {
             "url": services.listener_url(),
             "wifi": s.wifi_name,
+            "church": s.church_name,
             "languages": services.listener_languages(),
         }
 
@@ -272,11 +290,18 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         tr = services.translator
         source = s.source_language
         sources = sorted(
-            ({"code": l["code"], "name": native_name(l["code"], l["name"])} for l in tr.languages),
+            ({"code": c, "name": native_name(c, tr.name_of(c))} for c in tr.catalog),
             key=lambda l: l["name"].lower(),
         )
-        targets = [{"code": c, "name": native_name(c, tr.name_of(c))} for c in tr.targets_for(source)]
+        targets = [l for l in sources if l["code"] != source]
         return {
+            # For the wizard, which offers a choice of engine before either has been started.
+            "catalogs": {"libretranslate": tr.libre.catalog, "nllb": tr.nllb.catalog},
+            "whisper_languages": sorted(WHISPER_LANGUAGES),
+            "voices": sorted(VOICES),
+            "version": __version__,
+            "data_folder": str(services.data),
+            "can_move_data": install_dir() is not None,
             "settings": s.model_dump(),
             "status": services.pipeline.status(),
             "quick_language_options": [
@@ -286,6 +311,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
                 {"code": c, "name": native_name(c, tr.name_of(c))} for c in services.pipeline.speaker_languages()
             ],
             "vmix": services.vmix.status,
+            "obs": services.obs.status,
             "translator": translator_status(tr),
             "update": services.updater.status(),
             "tunnel": services.tunnel.status(),
@@ -340,6 +366,8 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         if new.source_language != old.source_language or new.vmix.url != old.vmix.url:
             services.pipeline.speaker_language = new.source_language
             services.vmix.previous = None
+        if new.source_language != old.source_language or new.obs.source != old.obs.source:
+            services.obs.previous = None
         # Gain applies live; any other audio change reopens the input.
         services.pipeline.set_gain(new.audio.gain)
         audio_changed = new.audio.model_copy(update={"gain": old.audio.gain}) != old.audio
@@ -437,6 +465,73 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             raise HTTPException(404, "This service has no recording")
         return Response(await asyncio.to_thread(calibration.audio_clip, folder, t), media_type="audio/wav")
 
+    @app.post("/api/admin/setup/prepare")
+    async def prepare(request: Request):
+        """Download what the chosen settings need; the wizard follows it with /setup/status."""
+        require_admin(request)
+        services.preparation.start()
+        return services.preparation.status()
+
+    @app.get("/api/admin/setup/status")
+    async def preparation_status(request: Request):
+        require_admin(request)
+        return await asyncio.to_thread(services.preparation.status)
+
+    @app.post("/api/admin/setup/finish")
+    async def finish_setup(request: Request):
+        require_admin(request)
+        services.store.save(services.settings.model_copy(update={"setup_done": True}))
+        if services.translator.status in ("stopped", "error"):  # the wizard was finished despite a failed step
+            asyncio.create_task(_start_translator(services))
+        if services.settings.auto_start_translation:
+            asyncio.create_task(_auto_start(services))
+        return {"ok": True}
+
+    @app.post("/api/admin/setup/again")
+    async def setup_again(request: Request):
+        """Settings → About: go through the wizard again."""
+        require_admin(request)
+        services.store.save(services.settings.model_copy(update={"setup_done": False}))
+        services.preparation.forget()
+        return {"ok": True}
+
+    @app.get("/api/admin/close")
+    async def close_action(request: Request):
+        """The cross of the app window: what to do. See LT.askClose in common.js."""
+        require_admin(request)
+        return {"action": services.settings.close_action}
+
+    @app.post("/api/admin/close")
+    async def close_choice(request: Request):
+        require_admin(request)
+        if not request.client or request.client.host not in LOCAL_HOSTS:
+            raise HTTPException(403, "Only the window on the PC itself can do this.")
+        body = await request.json()
+        action = body.get("action")
+        if action not in ("tray", "exit"):
+            raise HTTPException(400, "Unknown action.")
+        if body.get("remember"):
+            services.store.save(services.settings.model_copy(update={"close_action": action}))
+        if action == "exit" and services.updater.request_exit:
+            log.info("Exit chosen when closing the window")
+            asyncio.get_running_loop().call_later(0.5, services.updater.request_exit)
+        return {"ok": True}
+
+    @app.post("/api/admin/data/move")
+    async def move_data(request: Request):
+        """Close the app and let the setup window move the data; see LiveTranslateSetup.ps1."""
+        require_admin(request)
+        if not request.client or request.client.host not in LOCAL_HOSTS:
+            raise HTTPException(403, "The folder is chosen on the PC itself.")
+        folder = install_dir()
+        if folder is None:
+            raise HTTPException(400, "Only the installed app can move its data.")
+        if services.pipeline.state != "stopped":
+            raise HTTPException(409, "Stop translating first.")
+        start_data_move(folder)
+        asyncio.get_running_loop().call_later(1.0, services.updater.request_exit)
+        return {"ok": True}
+
     @app.post("/api/admin/mark")
     async def mark(request: Request):
         """Note this moment in the service log ("this went wrong")."""
@@ -455,38 +550,52 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
 
     @app.post("/api/admin/speaker")
     async def set_speaker(request: Request):
-        """Switch the language being spoken at the microphone (e.g. Russian for a testimony)."""
+        """Switch the language being spoken at the microphone (e.g. for a testimony in another language)."""
         require_admin(request)
         lang = (await request.json()).get("lang")
         try:
             await services.pipeline.set_speaker_language(lang)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return {"speaker_language": services.pipeline.speaker_language, "vmix": services.vmix.status}
+        return {
+            "speaker_language": services.pipeline.speaker_language,
+            "vmix": services.vmix.status,
+            "obs": services.obs.status,
+        }
 
-    @app.get("/api/admin/vmix/inputs")
-    async def vmix_inputs(request: Request):
-        require_admin(request)
-        state = await services.vmix.inputs()
-        if state is None:
-            raise HTTPException(502, services.vmix.status["error"] or "vMix not reachable")
-        return state
+    def streaming_routes(name: str, output) -> None:
+        async def inputs(request: Request):
+            require_admin(request)
+            state = await output.state()
+            if state is None:
+                raise HTTPException(502, output.status["error"] or f"{output.name} not reachable")
+            return state
 
-    @app.post("/api/admin/vmix/overlay")
-    async def vmix_overlay(request: Request):
-        require_admin(request)
-        on = bool((await request.json()).get("on"))
-        if not await services.vmix.overlay(on):
-            raise HTTPException(502, services.vmix.status["error"] or "Choose a vMix input first")
-        return services.vmix.status
+        async def status(request: Request):
+            require_admin(request)
+            return await output.refresh()
 
-    @app.post("/api/admin/vmix/test")
-    async def vmix_test(request: Request):
-        require_admin(request)
-        text = (await request.json()).get("text") or "Live Translate ✓"
-        if not await services.vmix.show(text):
-            raise HTTPException(502, services.vmix.status["error"] or "Choose a vMix input and field first")
-        return services.vmix.status
+        async def overlay(request: Request):
+            require_admin(request)
+            on = bool((await request.json()).get("on"))
+            if not await output.overlay(on):
+                raise HTTPException(502, output.status["error"] or f"Choose what to show in {output.name} first")
+            return output.status
+
+        async def test(request: Request):
+            require_admin(request)
+            text = (await request.json()).get("text") or "Live Translate ✓"
+            if not await output.show(text):
+                raise HTTPException(502, output.status["error"] or f"Choose what to show in {output.name} first")
+            return output.status
+
+        app.add_api_route(f"/api/admin/{name}/inputs", inputs)
+        app.add_api_route(f"/api/admin/{name}/status", status)
+        app.add_api_route(f"/api/admin/{name}/overlay", overlay, methods=["POST"])
+        app.add_api_route(f"/api/admin/{name}/test", test, methods=["POST"])
+
+    streaming_routes("vmix", services.vmix)
+    streaming_routes("obs", services.obs)
 
     @app.post("/api/admin/glossary/test")
     async def glossary_test(request: Request):
@@ -504,7 +613,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             parts = [await services.translator.translate(p, s.source_language, lang) for p in sentences]
             result = {"text": " ".join(parts)}
             if lang != "en":
-                # Back into English, so an operator who can't read Russian can check the meaning.
+                # Back into English, so an operator who can't read the language can check the meaning.
                 back = [await services.translator.translate(p, lang, "en") for p in parts]
                 result["back"] = " ".join(back)
             return result
@@ -643,6 +752,7 @@ async def _admin_ticker(services: Services) -> None:
                 "gpu": gpu,
                 "translator": translator_status(tr),
                 "vmix": services.vmix.status,
+                "obs": services.obs.status,
                 "update": services.updater.status(),
                 "tunnel": services.tunnel.status(),
             }

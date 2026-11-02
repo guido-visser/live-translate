@@ -28,10 +28,11 @@
       <button type="button" role="tab" data-tab="languages" data-t="tabLanguages"></button>
       <button type="button" role="tab" data-tab="quick" data-t="tabQuick"></button>
       <button type="button" role="tab" data-tab="glossary" data-t="tabGlossary"></button>
-      <button type="button" role="tab" data-tab="vmix" data-t="tabVmix"></button>
+      <button type="button" role="tab" data-tab="streaming" data-t="tabStreaming"></button>
       <button type="button" role="tab" data-tab="network" data-t="tabNetwork"></button>
       <button type="button" role="tab" data-tab="startup" data-t="tabStartup"></button>
       <button type="button" role="tab" data-tab="log" data-t="tabLog"></button>
+      <button type="button" role="tab" data-tab="about" data-t="tabAbout"></button>
     </nav>
 
     <form id="settingsForm" class="card tab-panels" autocomplete="off">
@@ -42,11 +43,11 @@
         <div class="row pair">
           <div>
             <label for="churchName" data-t="churchName"></label>
-            <input id="churchName" type="text" placeholder="Evangeliegemeente De Kandelaar">
+            <input id="churchName" type="text" data-t-placeholder="churchNameHint">
           </div>
           <div>
             <label for="churchShort" data-t="churchShort"></label>
-            <input id="churchShort" type="text" placeholder="De Kandelaar">
+            <input id="churchShort" type="text" data-t-placeholder="churchShortHint">
           </div>
         </div>
         <div class="inline-buttons">
@@ -160,7 +161,9 @@
           <select id="sourceLang"></select>
         </div>
         <h2 data-t="listenerLanguages"></h2>
+        <input id="targetsSearch" class="lang-search" type="search" data-t-placeholder="searchLanguages" aria-label="Search">
         <div id="targets" class="targets"></div>
+        <p id="targetsNone" class="muted small" data-t="searchNone" hidden></p>
         <label class="check"><input id="tts" type="checkbox"> <span data-t="tts"></span> 🔊</label>
 
         <h2 data-t="engine"></h2>
@@ -192,7 +195,9 @@
       <!-- Quick languages -->
       <section class="tab-panel" data-panel="quick" role="tabpanel">
         <h2 data-t="quickLanguages"></h2>
+        <input id="quickSearch" class="lang-search" type="search" data-t-placeholder="searchLanguages" aria-label="Search">
         <div id="quick" class="targets"></div>
+        <p id="quickNone" class="muted small" data-t="searchNone" hidden></p>
       </section>
 
       <!-- Glossary -->
@@ -219,48 +224,112 @@
         <dl id="glossaryResult" class="glossary-result"></dl>
       </section>
 
-      <!-- vMix -->
-      <section class="tab-panel" data-panel="vmix" role="tabpanel">
-        <label class="check"><input id="vmixEnabled" type="checkbox"> <span data-t="sendToVmix"></span></label>
+      <!-- Streaming software -->
+      <section class="tab-panel" data-panel="streaming" role="tabpanel">
         <div class="row">
-          <label for="vmixUrl" data-t="vmixUrl"></label>
-          <div class="inline">
-            <input id="vmixUrl" type="text" placeholder="http://127.0.0.1:8088">
-            <button id="vmixRefresh" type="button" aria-label="Refresh">↻</button>
-          </div>
+          <label for="mainStreaming" data-t="streamMain"></label>
+          <select id="mainStreaming">
+            <option value="none" data-t="streamMainNone"></option>
+            <option value="vmix">vMix</option>
+            <option value="obs">OBS Studio</option>
+          </select>
         </div>
-        <div class="row pair">
-          <div>
-            <label for="vmixInput" data-t="vmixInput"></label>
-            <select id="vmixInput"></select>
+        <p class="muted small" data-t="streamMainHelp"></p>
+
+        <nav class="subtabs" role="tablist" aria-label="Streaming software">
+          <button type="button" role="tab" data-subtab="vmix">vMix</button>
+          <button type="button" role="tab" data-subtab="obs">OBS Studio</button>
+        </nav>
+
+        <div data-subpanel="vmix" role="tabpanel">
+          <label class="check"><input id="vmixEnabled" type="checkbox"> <span data-t-name="sendToSoftware" data-name="vMix"></span></label>
+          <div class="row">
+            <label for="vmixUrl" data-t="vmixUrl"></label>
+            <div class="inline">
+              <input id="vmixUrl" type="text" placeholder="http://127.0.0.1:8088">
+              <button id="vmixRefresh" type="button" aria-label="Refresh">↻</button>
+            </div>
           </div>
-          <div>
-            <label for="vmixField" data-t="vmixField"></label>
-            <select id="vmixField"></select>
+          <div class="row pair">
+            <div>
+              <label for="vmixInput" data-t="vmixInput"></label>
+              <select id="vmixInput"></select>
+            </div>
+            <div>
+              <label for="vmixField" data-t="vmixField"></label>
+              <select id="vmixField"></select>
+            </div>
           </div>
+          <div class="row pair">
+            <div>
+              <label for="vmixLanguage" data-t="vmixLanguage"></label>
+              <select id="vmixLanguage"></select>
+            </div>
+            <div>
+              <label for="vmixOverlay" data-t="vmixOverlay"></label>
+              <select id="vmixOverlay"></select>
+            </div>
+          </div>
+          <div class="row pair">
+            <div>
+              <label for="vmixMaxChars" data-t="vmixMaxChars"></label>
+              <input id="vmixMaxChars" type="number" min="20" max="1000" step="10">
+            </div>
+          </div>
+          <label class="check"><input id="vmixAuto" type="checkbox"> <span data-t="vmixAuto"></span></label>
+          <div class="inline-buttons">
+            <button id="vmixTest" type="button" data-t="vmixTest"></button>
+            <span id="vmixStatus" class="small"></span>
+          </div>
+          <p class="muted small" data-t="vmixRequires"></p>
         </div>
-        <div class="row pair">
-          <div>
-            <label for="vmixLanguage" data-t="vmixLanguage"></label>
-            <select id="vmixLanguage"></select>
+
+        <div data-subpanel="obs" role="tabpanel" hidden>
+          <label class="check"><input id="obsEnabled" type="checkbox"> <span data-t-name="sendToSoftware" data-name="OBS Studio"></span></label>
+          <div class="row pair obs-address">
+            <div>
+              <label for="obsHost" data-t="vmixUrl"></label>
+              <input id="obsHost" type="text" placeholder="127.0.0.1">
+            </div>
+            <div>
+              <label for="obsPort" data-t="port"></label>
+              <input id="obsPort" type="number" min="1" max="65535">
+            </div>
           </div>
-          <div>
-            <label for="vmixOverlay" data-t="vmixOverlay"></label>
-            <select id="vmixOverlay"></select>
+          <div class="row">
+            <label for="obsPassword" data-t="obsPassword"></label>
+            <div class="inline">
+              <input id="obsPassword" type="password" autocomplete="new-password">
+              <button id="obsRefresh" type="button" aria-label="Refresh">↻</button>
+            </div>
           </div>
-        </div>
-        <div class="row pair">
-          <div>
-            <label for="vmixMaxChars" data-t="vmixMaxChars"></label>
-            <input id="vmixMaxChars" type="number" min="20" max="1000" step="10">
+          <div class="row pair">
+            <div>
+              <label for="obsSource" data-t="obsSource"></label>
+              <select id="obsSource"></select>
+            </div>
+            <div>
+              <label for="obsScene" data-t="obsScene"></label>
+              <select id="obsScene"></select>
+            </div>
           </div>
+          <div class="row pair">
+            <div>
+              <label for="obsLanguage" data-t="obsLanguage"></label>
+              <select id="obsLanguage"></select>
+            </div>
+            <div>
+              <label for="obsMaxChars" data-t="vmixMaxChars"></label>
+              <input id="obsMaxChars" type="number" min="20" max="1000" step="10">
+            </div>
+          </div>
+          <label class="check"><input id="obsAuto" type="checkbox"> <span data-t="obsAuto"></span></label>
+          <div class="inline-buttons">
+            <button id="obsTest" type="button" data-t="vmixTest"></button>
+            <span id="obsStatus" class="small"></span>
+          </div>
+          <p class="muted small" data-t="obsRequires"></p>
         </div>
-        <label class="check"><input id="vmixAuto" type="checkbox"> <span data-t="vmixAuto"></span></label>
-        <div class="inline-buttons">
-          <button id="vmixTest" type="button" data-t="vmixTest"></button>
-          <span id="vmixStatus" class="small"></span>
-        </div>
-        <p class="muted small" data-t="vmixRequires"></p>
       </section>
 
       <!-- Network -->
@@ -290,12 +359,12 @@
         <div id="remoteRows">
           <div class="row">
             <label for="remoteUrl" data-t="remoteUrl"></label>
-            <input id="remoteUrl" type="text" inputmode="url" placeholder="https://vertaling.example.nl">
+            <input id="remoteUrl" type="text" inputmode="url" placeholder="https://translate.example.org">
           </div>
           <div class="row pair">
             <div>
               <label for="remoteHost" data-t="remoteHost"></label>
-              <input id="remoteHost" type="text" placeholder="vps.example.nl">
+              <input id="remoteHost" type="text" placeholder="server.example.org">
             </div>
             <div>
               <label for="remoteUser" data-t="remoteUser"></label>
@@ -336,13 +405,6 @@
           </details>
         </div>
 
-        <h2 data-t="updates"></h2>
-        <label class="check"><input id="checkUpdates" type="checkbox"> <span data-t="checkUpdates"></span></label>
-        <div class="inline-buttons">
-          <span><span data-t="versionInstalled"></span>: <span id="version" class="mono"></span></span>
-          <button id="checkNow" type="button" data-t="checkNow"></button>
-        </div>
-        <p id="updateStatus" class="small muted"></p>
       </section>
 
       <!-- Startup -->
@@ -363,6 +425,14 @@
         <label class="check"><input id="autoStartTranslation" type="checkbox"> <span data-t="autoStartTranslation"></span></label>
         <p class="muted small" data-t="autoStartTranslationHelp"></p>
         <label class="check" id="appWindowRow"><input id="appWindow" type="checkbox"> <span data-t="appWindow"></span></label>
+        <div class="row" id="closeActionRow">
+          <label for="closeAction" data-t="closeAction"></label>
+          <select id="closeAction">
+            <option value="ask" data-t="closeActionAsk"></option>
+            <option value="tray" data-t="closeTray"></option>
+            <option value="exit" data-t="closeStop"></option>
+          </select>
+        </div>
       </section>
 
       <!-- Service log -->
@@ -375,6 +445,70 @@
         <div class="inline-buttons">
           <button id="logOpen" type="button" data-t="logOpen"></button>
           <span id="logFolder" class="small muted mono"></span>
+        </div>
+      </section>
+
+      <!-- About -->
+      <section class="tab-panel" data-panel="about" role="tabpanel">
+        <div class="about-head">
+          <img src="/static/icon.png" alt="" width="56" height="56">
+          <div>
+            <div class="about-name">Live Translate</div>
+            <div class="muted" data-t="aboutTagline"></div>
+          </div>
+        </div>
+        <p data-t="aboutText"></p>
+
+        <h2 data-t="updates"></h2>
+        <dl class="glossary-result">
+          <dt data-t="versionInstalled"></dt><dd id="version" class="mono"></dd>
+          <dt data-t="versionLatest"></dt><dd id="versionLatest" class="mono"></dd>
+        </dl>
+        <p id="updateStatus" class="small muted"></p>
+        <div class="inline-buttons">
+          <button id="checkNow" type="button" data-t="checkNow"></button>
+        </div>
+        <label class="check"><input id="checkUpdates" type="checkbox"> <span data-t="checkUpdates"></span></label>
+
+        <h2 data-t="aboutDetails"></h2>
+        <dl class="glossary-result">
+          <dt data-t="aboutAuthor"></dt><dd>Guido Visser</dd>
+          <dt data-t="aboutLicense"></dt><dd>MIT</dd>
+          <dt data-t="aboutSource"></dt><dd><a href="https://github.com/guido-visser/live-translate" target="_blank" rel="noopener">github.com/guido-visser/live-translate</a></dd>
+          <dt data-t="aboutProblem"></dt><dd><a href="https://github.com/guido-visser/live-translate/issues" target="_blank" rel="noopener" data-t="aboutReport"></a></dd>
+          <dt data-t="aboutData"></dt><dd id="dataFolder" class="mono small"></dd>
+        </dl>
+        <p class="muted small" data-t="aboutPrivacy"></p>
+        <div id="moveRow">
+          <p class="muted small" data-t="aboutMoveHelp"></p>
+          <div class="inline-buttons">
+            <button id="moveData" type="button" data-t="aboutMove"></button>
+            <span id="moveStatus" class="small"></span>
+          </div>
+        </div>
+
+        <h2 data-t="aboutSupport"></h2>
+        <p class="muted small" data-t="aboutSupportHelp"></p>
+        <div class="inline-buttons">
+          <a class="button-like donate" href="https://buymeacoffee.com/guidovisser" target="_blank" rel="noopener">☕ <span data-t="aboutDonate"></span></a>
+        </div>
+
+        <h2 data-t="aboutCredits"></h2>
+        <p class="muted small" data-t="aboutCreditsHelp"></p>
+        <table class="about-credits small">
+          <tr><td><a href="https://github.com/SYSTRAN/faster-whisper" target="_blank" rel="noopener">faster-whisper</a></td><td data-t="creditSpeech"></td><td>MIT</td></tr>
+          <tr><td><a href="https://github.com/snakers4/silero-vad" target="_blank" rel="noopener">Silero VAD</a></td><td data-t="creditVoice"></td><td>MIT</td></tr>
+          <tr><td><a href="https://github.com/tensorflow/models/tree/master/research/audioset/yamnet" target="_blank" rel="noopener">YAMNet</a></td><td data-t="creditSongs"></td><td>Apache 2.0</td></tr>
+          <tr><td><a href="https://github.com/facebookresearch/fairseq/tree/nllb" target="_blank" rel="noopener">NLLB-200 (Meta)</a></td><td data-t="creditTranslation"></td><td>CC-BY-NC 4.0</td></tr>
+          <tr><td><a href="https://github.com/LibreTranslate/LibreTranslate" target="_blank" rel="noopener">LibreTranslate</a></td><td data-t="creditTranslation"></td><td>AGPL 3.0</td></tr>
+          <tr><td><a href="https://github.com/OHF-Voice/piper1-gpl" target="_blank" rel="noopener">Piper</a></td><td data-t="creditVoices"></td><td>GPL 3.0</td></tr>
+          <tr><td><a href="https://github.com/r0x0r/pywebview" target="_blank" rel="noopener">pywebview</a></td><td data-t="creditWindow"></td><td>BSD 3-Clause</td></tr>
+        </table>
+
+        <h2 data-t="aboutSetup"></h2>
+        <p class="muted small" data-t="aboutSetupHelp"></p>
+        <div class="inline-buttons">
+          <button id="setupAgain" type="button" data-t="aboutSetupButton"></button>
         </div>
       </section>
 

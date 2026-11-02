@@ -15,10 +15,10 @@ For those fixed translations the engines need different tricks (tested on real s
   afterwards (undeclined). "[1]" beat "{1}" and "(1)": to Russian it survived 7 of 8
   test sentences, against 3 and 6.
 
-A name stays as it is: an entry whose English word is the spoken word itself ("Kandelaar"
-→ "Kandelaar"). The engine would translate that word anyway ("Candlestick"), so a name is
-always a placeholder, with NLLB too. With a word filled in for a language (Cyrillic for
-Russian) that word goes back in, otherwise the name as it was spoken.
+A name stays as it is: an entry whose English word is the spoken word itself. The engine would
+translate that word anyway, so a name is always a placeholder, with NLLB too. With a word filled
+in for a language (the spelling in its own alphabet) that word goes back in, otherwise the name
+as it was spoken.
 """
 
 from __future__ import annotations
@@ -88,7 +88,9 @@ class Glossary:
             entry = entries[int(match.lastgroup[1:])]
             translation = entry.translations.get(target, "").strip()
             name = is_name(entry)
-            if name and not translation:
+            # A name's English word only marks it as a name; with several names in one row
+            # it shouldn't turn them all into the first one.
+            if name and (not translation or target == HINT):
                 translation = match.group(0)
             if not translation:
                 hint = entry.translations.get(HINT, "").strip()

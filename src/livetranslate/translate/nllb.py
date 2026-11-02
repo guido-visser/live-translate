@@ -21,6 +21,7 @@ MODELS = {
     "600M": "JustFrederik/nllb-200-distilled-600M-ct2-int8",
     "1.3B": "OpenNMT/nllb-200-distilled-1.3B-ct2-int8",
 }
+DOWNLOAD_PATTERNS = ["*.bin", "*.json", "*.txt", "*.model"]
 
 # ISO 639-1 (as used in the rest of the app) → NLLB/FLORES-200 codes, with English names.
 LANGUAGES: dict[str, tuple[str, str]] = {
@@ -115,6 +116,10 @@ class NllbTranslator:
         self._model_lock = threading.Lock()
         self.configure(settings)
 
+    @property
+    def catalog(self) -> list[str]:
+        return list(LANGUAGES)
+
     def configure(self, settings: Settings) -> None:
         self.model = settings.translation.nllb_model
         self.device = settings.translation.nllb_device
@@ -145,7 +150,7 @@ class NllbTranslator:
             self.status = "installing"
             self.detail = f"Downloading NLLB {self.model} (one time, needs internet)…"
             log.info("Downloading %s", repo)
-            snapshot_download(repo, local_dir=folder, allow_patterns=["*.bin", "*.json", "*.txt", "*.model"])
+            snapshot_download(repo, local_dir=folder, allow_patterns=DOWNLOAD_PATTERNS)
         self.status, self.detail = "starting", f"Loading NLLB {self.model}…"
 
         setup_cuda_dll_paths()

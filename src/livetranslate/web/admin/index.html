@@ -108,18 +108,20 @@
         <p id="qStatus" class="small muted" hidden></p>
       </section>
 
-      <section class="card vmix-quick">
-        <h2>vMix</h2>
+      <section id="streamPanel" class="card vmix-quick" hidden>
+        <div class="stream-head">
+          <h2 id="streamName"></h2>
+          <span id="streamStatus" class="small muted"></span>
+        </div>
         <label class="switch-row">
-          <span data-t="sendToVmix"></span>
-          <button id="vmixSend" class="switch" type="button" role="switch" aria-checked="false"></button>
+          <span id="streamSendLabel"></span>
+          <button id="streamSend" class="switch" type="button" role="switch" aria-checked="false"></button>
         </label>
         <label class="switch-row">
-          <span data-t="overlay"></span>
-          <button id="vmixOverlay" class="switch" type="button" role="switch" aria-checked="false"></button>
+          <span id="streamOverlayLabel"></span>
+          <button id="streamOverlay" class="switch" type="button" role="switch" aria-checked="false"></button>
         </label>
-        <p id="vmixStatus" class="small muted"></p>
-        <pre id="vmixLast" class="vmix-last" hidden></pre>
+        <pre id="streamLast" class="vmix-last" hidden></pre>
       </section>
     </div>
   </main>

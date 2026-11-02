@@ -196,6 +196,9 @@
   // -- language picker -----------------------------------------------------------
 
   function renderLanguages() {
+    // In the phone's own language; the buttons below are each in their own language anyway.
+    const own = window.I18N[(state.lang || navigator.language || "en").slice(0, 2)] || window.I18N.en;
+    $("pickerTitle").textContent = `🌐 ${own.choose}`;
     const list = $("langList");
     list.textContent = "";
     for (const lang of state.languages) {

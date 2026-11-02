@@ -13,27 +13,9 @@ from collections.abc import Callable
 import httpx
 
 from ..config import Settings, VmixSettings
+from .subtitles import SubtitleOutput, compose, tail  # noqa: F401
 
 log = logging.getLogger(__name__)
-
-
-def tail(text: str, max_chars: int) -> str:
-    """The end of a long sentence, cut at a word boundary, marked with an ellipsis."""
-    if len(text) <= max_chars:
-        return text
-    cut = text[-(max_chars - 1) :]
-    space = cut.find(" ")
-    if 0 <= space < len(cut) - 1:
-        cut = cut[space + 1 :]
-    return "…" + cut
-
-
-def compose(previous: str | None, current: str, max_chars: int) -> str:
-    """Rolling two-line subtitle: previous sentence above the current one, if both fit."""
-    current = tail(current, max_chars)
-    if previous and len(previous) + 1 + len(current) <= max_chars:
-        return f"{previous}\n{current}"
-    return current
 
 
 def parse_state(xml_text: str) -> dict:
@@ -87,43 +69,37 @@ class VmixClient:
         await self._client.aclose()
 
 
-class VmixOutput:
-    """Rolling subtitles + overlay control. Failures are reported, never raised."""
+class VmixOutput(SubtitleOutput):
+    name = "vMix"
+    errors = (httpx.HTTPError, ET.ParseError)
 
     def __init__(self, get_settings: Callable[[], Settings], transport: httpx.AsyncBaseTransport | None = None):
+        super().__init__()
         self._get_settings = get_settings
         self._transport = transport
         self._client: VmixClient | None = None
-        self.previous: str | None = None
-        self.status = {"ok": None, "error": "", "last_text": "", "overlay": None}
 
     @property
     def settings(self) -> VmixSettings:
         return self._get_settings().vmix
 
     @property
-    def active(self) -> bool:
+    def ready(self) -> bool:
         s = self.settings
-        return s.enabled and bool(s.input and s.field)
+        return bool(s.input and s.field)
 
     def client(self) -> VmixClient:
         if self._client is None or self._client.url != self.settings.url.rstrip("/"):
             self._client = VmixClient(self.settings.url, self._transport)
         return self._client
 
-    async def _guard(self, action) -> bool:
-        try:
-            await action
-        except (httpx.HTTPError, ET.ParseError) as exc:
-            message = str(exc) or exc.__class__.__name__
-            if self.status["error"] != message:
-                log.warning("vMix: %s", message)
-            self.status.update(ok=False, error=message)
-            return False
-        self.status.update(ok=True, error="")
-        return True
+    async def _set_text(self, text: str) -> None:
+        await self.client().set_text(self.settings.input, self.settings.field, text)
 
-    async def inputs(self) -> dict | None:
+    async def _set_overlay(self, on: bool) -> None:
+        await self.client().overlay(self.settings.overlay, on, self.settings.input)
+
+    async def state(self) -> dict | None:
         result: dict = {}
 
         async def fetch():
@@ -131,32 +107,13 @@ class VmixOutput:
 
         return result if await self._guard(fetch()) else None
 
-    async def show(self, text: str) -> bool:
-        s = self.settings
-        if not (s.input and s.field):
-            return False
-        ok = await self._guard(self.client().set_text(s.input, s.field, text))
-        if ok:
-            self.status["last_text"] = text
-        return ok
-
-    async def push(self, sentence: str) -> None:
-        if not self.active:
-            return
-        text = compose(self.previous, sentence, self.settings.max_chars)
-        self.previous = text.split("\n")[-1]
-        await self.show(text)
-
-    async def clear(self) -> None:
-        self.previous = None
-        if self.active:
-            await self.show("")
+    async def refresh(self) -> dict:
+        return self.status
 
     async def overlay(self, on: bool) -> bool:
-        s = self.settings
-        if not s.input:
+        if not self.settings.input:  # the overlay only needs the input, not the text field
             return False
-        ok = await self._guard(self.client().overlay(s.overlay, on, s.input))
+        ok = await self._guard(self._set_overlay(on))
         if ok:
             self.status["overlay"] = on
         return ok
