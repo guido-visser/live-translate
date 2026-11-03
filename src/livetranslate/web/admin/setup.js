@@ -22,7 +22,8 @@
   let step = 0;
   let polling = null;
   let finished = null;
-  const openDetails = new Set(); // survive the redraw every second
+  const prepareRows = new Map(); // kept between updates, so the bars can move instead of being redrawn
+  let prepareKeys = "";
   let followInterface = false; // the spoken language follows the interface language until someone picks one
 
   // -- language lists ------------------------------------------------------------------------
@@ -254,45 +255,54 @@
 
   const size = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`);
 
+  function preparationRow() {
+    const row = document.createElement("div");
+    const head = document.createElement("div");
+    head.className = "wizard-row-head";
+    const name = document.createElement("span");
+    const detail = document.createElement("span");
+    detail.className = "muted small";
+    head.append(name, detail);
+    const bar = document.createElement("div");
+    bar.className = "wizard-progress";
+    const fill = document.createElement("div");
+    bar.append(fill);
+    // The heading already says what to do; the technical message is only for whoever helps out.
+    const more = document.createElement("details");
+    more.className = "wizard-detail small muted";
+    const summary = document.createElement("summary");
+    const message = document.createElement("span");
+    more.append(summary, message);
+    row.append(head, bar, more);
+    return { row, name, detail, fill, more, summary, message };
+  }
+
   function drawPreparation(status) {
     const rows = $("wizPrepareRows");
-    rows.textContent = "";
+    const keys = status.steps.map((item) => item.key).join();
+    if (keys !== prepareKeys) {
+      prepareKeys = keys;
+      rows.textContent = "";
+      prepareRows.clear();
+      for (const item of status.steps) {
+        prepareRows.set(item.key, preparationRow());
+        rows.append(prepareRows.get(item.key).row);
+      }
+    }
     for (const item of status.steps) {
-      const row = document.createElement("div");
+      const { row, name, detail, fill, more, summary, message } = prepareRows.get(item.key);
       row.className = `wizard-row ${item.state}`;
-      const head = document.createElement("div");
-      head.className = "wizard-row-head";
-      const name = document.createElement("span");
       name.textContent = t(`wizPrep_${item.key}`);
-      const detail = document.createElement("span");
-      detail.className = "muted small";
+      detail.textContent = "";
       if (item.state === "done") detail.textContent = "✓";
       else if (item.state === "waiting") detail.textContent = t("wizWaiting");
-      else if (item.state === "busy" && item.total) {
-        detail.textContent = item.key === "voices"
-          ? `${item.done} / ${item.total}`
-          : `${size(Math.min(item.done, item.total))} / ${size(item.total)}`;
-      } else if (item.state === "busy") detail.textContent = t("wizWorking");
-      head.append(name, detail);
-      const bar = document.createElement("div");
-      bar.className = "wizard-progress";
-      const fill = document.createElement("div");
-      if (item.state === "busy" && !item.total) fill.className = "unknown";
+      else if (item.state === "busy" && item.total) detail.textContent = `${size(Math.min(item.done, item.total))} / ${size(item.total)}`;
+      else if (item.state === "busy") detail.textContent = t("wizWorking");
+      fill.className = item.state === "busy" && !item.total ? "unknown" : "";
       fill.style.width = item.state === "done" ? "100%" : item.total ? `${Math.min(100, (item.done / item.total) * 100)}%` : "";
-      bar.append(fill);
-      row.append(head, bar);
-      if (item.state === "error") {
-        // The heading already says what to do; the technical message is only for whoever helps out.
-        const more = document.createElement("details");
-        more.className = "wizard-detail small muted";
-        const summary = document.createElement("summary");
-        summary.textContent = t("wizErrorDetails");
-        more.append(summary, item.error);
-        more.open = openDetails.has(item.key);
-        more.addEventListener("toggle", () => (more.open ? openDetails.add(item.key) : openDetails.delete(item.key)));
-        row.append(more);
-      }
-      rows.append(row);
+      more.hidden = item.state !== "error";
+      summary.textContent = t("wizErrorDetails");
+      message.textContent = item.error;
     }
     const failed = status.finished && !status.ok;
     $("wizPrepareTitle").textContent = t(status.ok ? "wizDone" : failed ? "wizFailed" : "wizPreparing");

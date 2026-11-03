@@ -9,6 +9,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
@@ -36,10 +37,19 @@ log = logging.getLogger(__name__)
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+LOCAL_NAMES = {"127.0.0.1", "::1", "localhost", "testserver"}
 WHISPER_MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
 # What phones may reach through the internet tunnel: the listener page and nothing else.
 TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/api/public", "/ws/listen", "/static/icon.png"}
 TUNNEL_PREFIXES = ("/static/client/", "/audio/")
+
+
+def _is_local_name(address: str) -> bool:
+    """The Host header of a request: "127.0.0.1:8000", "[::1]:8000", "localhost:8000"."""
+    try:
+        return urlsplit(f"//{address}").hostname in LOCAL_NAMES
+    except ValueError:
+        return False
 
 
 class FreshStaticFiles(StaticFiles):
@@ -161,7 +171,13 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     def require_admin(request: Request | WebSocket) -> None:
         host = request.client.host if request.client else ""
         pin = services.settings.admin_pin
-        if host in LOCAL_HOSTS or (pin and request.query_params.get("pin") == pin):
+        address = request.headers.get("host", "")
+        # A website open in a browser on this PC also comes from 127.0.0.1. Browsers say where a
+        # request comes from (Origin); the address checks out too when a website's name points here.
+        origin = request.headers.get("origin")
+        if origin and origin.split("://", 1)[-1].lower() != address.lower():
+            raise HTTPException(403, "Requests from other websites are refused.")
+        if (host in LOCAL_HOSTS and _is_local_name(address)) or (pin and request.query_params.get("pin") == pin):
             return
         raise HTTPException(403, "The admin page is only available on this computer.")
 
@@ -346,6 +362,8 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         new = Settings.model_validate(await request.json())
         new.port = old.port  # the port only changes on restart (it is in the QR code)
         new.remote.local_port = old.remote.local_port  # bound at start
+        # These have their own switch and slider; a page's older copy must not undo them.
+        new.skip_singing, new.song_level = old.skip_singing, old.song_level
         services.store.save(new)
         if new.start_with_windows != old.start_with_windows:
             autostart.apply(new.start_with_windows)

@@ -172,7 +172,13 @@ def test_preparation_downloads_what_was_chosen_and_reports_failures(tmp_path, mo
 
     monkeypatch.setattr(firstrun.Preparation, "_speech", fake_speech)
     monkeypatch.setattr(services.translator, "start", fake_start)
-    monkeypatch.setattr(services.speech.bank, "_files", lambda lang: fetched.append(lang))
+    monkeypatch.setattr(services.speech.bank, "download_size", lambda langs: 2000)
+
+    def fake_files(lang, progress):
+        fetched.append(lang)
+        progress(1000)
+
+    monkeypatch.setattr(services.speech.bank, "_files", fake_files)
 
     with client:
         assert client.get("/api/admin/setup/status").json()["started"] is False
@@ -186,8 +192,59 @@ def test_preparation_downloads_what_was_chosen_and_reports_failures(tmp_path, mo
     by_key = {s["key"]: s for s in status["steps"]}
     assert by_key["speech"]["state"] == "done"
     assert by_key["translation"]["state"] == "error" and by_key["translation"]["error"] == "no internet"
-    assert by_key["voices"]["state"] == "done" and by_key["voices"]["done"] == 2  # goes on after a failure
+    assert by_key["voices"]["state"] == "done"  # goes on after a failure
+    assert by_key["voices"]["done"] == by_key["voices"]["total"] == 2000
     assert fetched == [store.settings.asr.model, "ru", "de"] and translated
+
+
+def test_the_app_closes_while_a_phone_is_listening(tmp_path):
+    """An audio stream never ends by itself, and an update's installer waits for this process."""
+    import socket
+    import threading
+    import time
+
+    import httpx
+
+    from livetranslate.__main__ import SHUTDOWN_WAIT_S, make_server
+    from livetranslate.config import SettingsStore
+    from livetranslate.server.app import create_app
+
+    store = SettingsStore(tmp_path / "settings.json")
+    store.save(Settings(target_languages=["ru"], tts_enabled=True))
+    app = create_app(store, tmp_path, manage_translator=False)
+    speech = app.state.services.speech
+    speech.bank.has_voice = lambda lang: True
+    speech.bank._files = lambda lang, progress=None: None
+    speech.bank._voice = lambda lang: None
+
+    listening = socket.create_server(("127.0.0.1", 0))
+    port = listening.getsockname()[1]
+    server = make_server(app, port)
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [listening]}, daemon=True)
+    thread.start()
+    while not server.started:
+        time.sleep(0.02)
+
+    def phone():
+        try:
+            with httpx.stream("GET", f"http://127.0.0.1:{port}/audio/ru.mp3", timeout=None) as response:
+                for _ in response.iter_bytes():
+                    pass
+        except httpx.HTTPError:
+            pass  # the server went away, as it should
+
+    threading.Thread(target=phone, daemon=True).start()
+    for _ in range(100):
+        if speech.listener_counts():
+            break
+        time.sleep(0.05)
+    assert speech.listener_counts() == {"ru": 1}
+
+    server.should_exit = True
+    thread.join(SHUTDOWN_WAIT_S + 5)
+    still_running = thread.is_alive()
+    server.force_exit = True  # don't leave it behind when this fails
+    assert not still_running
 
 
 def test_libretranslate_fetches_models_only_for_new_languages(tmp_path):

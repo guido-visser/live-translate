@@ -264,7 +264,7 @@ input[type=search] { width: 100%; padding: 7px 10px; border: 1px solid var(--bor
 .wizard-row-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 5px; font-weight: 600; }
 .wizard-row.waiting { opacity: 0.6; }
 .wizard-progress { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; position: relative; }
-.wizard-progress div { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width 0.4s; }
+.wizard-progress div { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width 1s linear; }
 .wizard-row.done .wizard-progress div { background: var(--ok); }
 .wizard-row.error .wizard-progress div { background: var(--danger); }
 .wizard-progress div.unknown { position: absolute; width: 35%; animation: wizard-slide 1.4s ease-in-out infinite; }

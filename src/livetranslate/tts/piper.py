@@ -11,6 +11,7 @@ import asyncio
 import logging
 import threading
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -21,7 +22,8 @@ from ..native import onnx_session, onnxruntime_failed, require_onnxruntime
 
 log = logging.getLogger(__name__)
 
-HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+HF_REPO = "rhasspy/piper-voices"
+HF_BASE = f"https://huggingface.co/{HF_REPO}/resolve/main/"
 
 # One good default voice per language (path inside the piper-voices repository).
 VOICES = {
@@ -98,11 +100,32 @@ class VoiceBank:
             self.gpu = gpu
             self._voices.clear()
 
-    def _files(self, lang: str) -> tuple[Path, Path]:
-        """The voice's files, downloaded when missing."""
+    def _local(self, lang: str) -> tuple[Path, Path]:
+        onnx = self.dir / (VOICES[lang].rsplit("/", 1)[1] + ".onnx")
+        return onnx, onnx.with_suffix(".onnx.json")
+
+    def download_size(self, langs: list[str]) -> int | None:
+        """What fetching these voices will come to, to show progress; None when unknown."""
+        from huggingface_hub import HfApi
+
+        paths = []
+        for lang in langs:
+            for target, suffix in zip(self._local(lang), (".onnx", ".onnx.json")):
+                if not target.exists():
+                    paths.append(VOICES[lang] + suffix)
+        if not paths:
+            return None
+        try:
+            files = HfApi().get_paths_info(HF_REPO, paths)
+        except Exception:
+            log.info("Could not look up the size of the voices", exc_info=True)
+            return None
+        return sum(f.size or 0 for f in files) or None
+
+    def _files(self, lang: str, progress: Callable[[int], None] | None = None) -> tuple[Path, Path]:
+        """The voice's files, downloaded when missing; progress hears of every piece that arrives."""
         name = VOICES[lang]
-        onnx = self.dir / (name.rsplit("/", 1)[1] + ".onnx")
-        meta = onnx.with_suffix(".onnx.json")
+        onnx, meta = self._local(lang)
         for target, suffix in ((onnx, ".onnx"), (meta, ".onnx.json")):
             if not target.exists():
                 log.info("Downloading Piper voice %s%s", name, suffix)
@@ -112,6 +135,8 @@ class VoiceBank:
                     with open(tmp, "wb") as f:
                         for chunk in r.iter_bytes():
                             f.write(chunk)
+                            if progress:
+                                progress(len(chunk))
                 tmp.replace(target)
         return onnx, meta
 

@@ -294,6 +294,42 @@ def test_closing_the_window_asks_until_a_choice_is_remembered(client):
     assert client.get("/api/admin/close").json() == {"action": "tray"}
 
 
+def test_a_page_with_an_older_copy_does_not_undo_the_song_settings(client):
+    settings = client.get("/api/admin/state").json()["settings"]
+    assert settings["skip_singing"] is True and settings["song_level"] == 0
+    client.post("/api/admin/singing", json={"on": False})
+    client.post("/api/admin/singing/level", json={"level": 2})
+    settings["audio"]["gain"] = 1.5  # the gain slider on the main screen sends everything it knows
+    saved = client.post("/api/admin/settings", json=settings).json()["settings"]
+    assert saved["audio"]["gain"] == 1.5
+    assert saved["skip_singing"] is False and saved["song_level"] == 2
+
+
+def test_other_websites_get_no_admin_access(client):
+    foreign = {"Origin": "https://evil.example"}
+    settings = client.get("/api/admin/state").json()["settings"]
+    assert client.post("/api/admin/stop", headers=foreign).status_code == 403
+    changed = {**settings, "wifi_name": "changed"}
+    assert client.post("/api/admin/settings", json=changed, headers=foreign).status_code == 403
+    assert client.get("/api/admin/state").json()["settings"]["wifi_name"] == settings["wifi_name"]
+    # A website's own name pointing at this PC: it then is its own origin, the address gives it away.
+    rebound = {"Host": "evil.example:8000", "Origin": "http://evil.example:8000"}
+    assert client.get("/api/admin/state", headers=rebound).status_code == 403
+    with pytest.raises(Exception):
+        with client.websocket_connect("/ws/admin", headers=foreign):
+            pass
+
+
+def test_the_operators_own_pages_keep_working(client):
+    assert client.post("/api/admin/mark", headers={"Origin": "http://testserver"}).status_code == 200
+    for address in ("127.0.0.1:8000", "localhost:8000", "[::1]:8000"):
+        origin = {"Host": address, "Origin": f"http://{address}"}
+        assert client.get("/api/admin/state", headers=origin).status_code == 200, address
+    with client.websocket_connect("/ws/admin", headers={"Origin": "http://testserver"}):
+        pass
+    assert client.get("/api/public", headers={"Host": "192.168.1.20:8000"}).status_code == 200  # phones
+
+
 def test_stop_and_exit_closes_the_app_but_keep_running_does_not(client):
     exits = []
     client.services.updater.request_exit = lambda: exits.append(True)

@@ -1,9 +1,16 @@
 import subprocess
+import sys
+import threading
+import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from livetranslate import native
-from livetranslate.config import Settings
+from livetranslate.audio.capture import LoopbackSource
+from livetranslate.audio.devices import list_loopback_devices
+from livetranslate.config import AudioSettings, Settings
 from livetranslate.translate import libretranslate
 from livetranslate.translate.libretranslate import LibreTranslate, _first_error
 from livetranslate.tts.piper import VoiceBank
@@ -37,6 +44,58 @@ def test_broken_onnxruntime_disables_voices_instead_of_crashing(monkeypatch, tmp
     assert not bank.has_voice("ru")
     with pytest.raises(RuntimeError, match="onnxruntime cannot be loaded"):
         bank._voice("ru")
+
+
+def test_pyaudio_never_starts_or_stops_on_two_threads_at_once(monkeypatch):
+    """That crashes the whole app, and page reloads can ask for the device list at any moment."""
+    busy = threading.Semaphore()
+    overlaps = []
+
+    def critical():
+        if not busy.acquire(blocking=False):
+            overlaps.append(True)
+            return
+        time.sleep(0.005)
+        busy.release()
+
+    device = {"name": "Speakers", "index": 0, "maxInputChannels": 2, "defaultSampleRate": 48000}
+
+    class FakePyAudio:
+        def __init__(self):
+            critical()
+
+        def terminate(self):
+            critical()
+
+        def get_default_wasapi_loopback(self):
+            return device
+
+        def get_loopback_device_info_generator(self):
+            return iter([device])
+
+        def open(self, **kwargs):
+            return MagicMock()
+
+    fake = SimpleNamespace(PyAudio=FakePyAudio, paFloat32=1, paContinue=0)
+    monkeypatch.setitem(sys.modules, "pyaudiowpatch", fake)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    def listing():
+        for _ in range(10):
+            list_loopback_devices()
+
+    def capturing():
+        for _ in range(10):
+            source = LoopbackSource(AudioSettings())
+            source.start(lambda block: None)
+            source.stop()
+
+    threads = [threading.Thread(target=job) for job in (listing, listing, capturing, capturing)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not overlaps
 
 
 def test_libretranslate_crash_message(monkeypatch, tmp_path):

@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from dataclasses import asdict, dataclass
 
 log = logging.getLogger(__name__)
+
+# Starting or stopping PyAudio from two threads at once crashes the whole app, not just the
+# thread, and a device list can be asked for at any moment (a page reload, capture starting).
+pyaudio_lock = threading.Lock()
 
 
 @dataclass
@@ -104,26 +109,27 @@ def list_loopback_devices() -> list[DeviceInfo]:
         import pyaudiowpatch as pyaudio
     except ImportError:
         return []
-    p = pyaudio.PyAudio()
-    try:
+    with pyaudio_lock:
+        p = pyaudio.PyAudio()
         try:
-            default_name = p.get_default_wasapi_loopback()["name"]
-        except Exception:
-            default_name = None
-        return [
-            DeviceInfo(
-                id=_device_id("WASAPI loopback", dev["name"]),
-                name=dev["name"],
-                host_api="WASAPI loopback",
-                channels=int(dev["maxInputChannels"]),
-                sample_rate=int(dev["defaultSampleRate"]),
-                kind="loopback",
-                is_default=dev["name"] == default_name,
-            )
-            for dev in p.get_loopback_device_info_generator()
-        ]
-    finally:
-        p.terminate()
+            try:
+                default_name = p.get_default_wasapi_loopback()["name"]
+            except Exception:
+                default_name = None
+            return [
+                DeviceInfo(
+                    id=_device_id("WASAPI loopback", dev["name"]),
+                    name=dev["name"],
+                    host_api="WASAPI loopback",
+                    channels=int(dev["maxInputChannels"]),
+                    sample_rate=int(dev["defaultSampleRate"]),
+                    kind="loopback",
+                    is_default=dev["name"] == default_name,
+                )
+                for dev in p.get_loopback_device_info_generator()
+            ]
+        finally:
+            p.terminate()
 
 
 def list_all() -> list[dict]:

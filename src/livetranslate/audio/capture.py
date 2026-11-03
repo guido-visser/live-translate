@@ -14,7 +14,7 @@ import numpy as np
 import soxr
 
 from ..config import AudioSettings
-from .devices import resolve_input_device, same_device_other_apis
+from .devices import pyaudio_lock, resolve_input_device, same_device_other_apis
 
 log = logging.getLogger(__name__)
 
@@ -139,44 +139,46 @@ class LoopbackSource(AudioSource):
         import pyaudiowpatch as pyaudio
 
         self._callback = callback
-        self._pa = pyaudio.PyAudio()
-        name = self.device_id.split("::", 1)[1] if self.device_id else None
-        dev = None
-        for candidate in self._pa.get_loopback_device_info_generator():
-            if name is None or candidate["name"] == name:
-                dev = candidate
-                break
-        if dev is None:
-            dev = self._pa.get_default_wasapi_loopback()
-        channels = int(dev["maxInputChannels"])
-        rate = int(dev["defaultSampleRate"])
-        self._setup(rate)
+        with pyaudio_lock:
+            self._pa = pyaudio.PyAudio()
+            name = self.device_id.split("::", 1)[1] if self.device_id else None
+            dev = None
+            for candidate in self._pa.get_loopback_device_info_generator():
+                if name is None or candidate["name"] == name:
+                    dev = candidate
+                    break
+            if dev is None:
+                dev = self._pa.get_default_wasapi_loopback()
+            channels = int(dev["maxInputChannels"])
+            rate = int(dev["defaultSampleRate"])
+            self._setup(rate)
 
-        def on_block(in_data, frame_count, time_info, status):
-            block = np.frombuffer(in_data, dtype=np.float32).reshape(-1, channels)
-            self._deliver(block)
-            return (None, pyaudio.paContinue)
+            def on_block(in_data, frame_count, time_info, status):
+                block = np.frombuffer(in_data, dtype=np.float32).reshape(-1, channels)
+                self._deliver(block)
+                return (None, pyaudio.paContinue)
 
-        self._stream = self._pa.open(
-            format=pyaudio.paFloat32,
-            channels=channels,
-            rate=rate,
-            input=True,
-            input_device_index=dev["index"],
-            frames_per_buffer=int(rate * 0.05),
-            stream_callback=on_block,
-        )
-        self._stream.start_stream()
+            self._stream = self._pa.open(
+                format=pyaudio.paFloat32,
+                channels=channels,
+                rate=rate,
+                input=True,
+                input_device_index=dev["index"],
+                frames_per_buffer=int(rate * 0.05),
+                stream_callback=on_block,
+            )
+            self._stream.start_stream()
         log.info("Capturing loopback from %s", dev["name"])
 
     def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
-        if self._pa is not None:
-            self._pa.terminate()
-            self._pa = None
+        with pyaudio_lock:
+            if self._stream is not None:
+                self._stream.stop_stream()
+                self._stream.close()
+                self._stream = None
+            if self._pa is not None:
+                self._pa.terminate()
+                self._pa = None
 
 
 class FileSource(AudioSource):

@@ -128,7 +128,10 @@ class Preparation:
     async def _voices(self, step: Step) -> None:
         speech = self.services.speech
         languages = [l for l in self.services.settings.target_languages if speech.has_voice(l)]
-        step.total = len(languages)
+        step.total = await asyncio.to_thread(speech.bank.download_size, languages)
+
+        def arrived(size: int) -> None:
+            step.done += size
+
         for lang in languages:
-            await asyncio.to_thread(speech.bank._files, lang)
-            step.done += 1
+            await asyncio.to_thread(speech.bank._files, lang, arrived)

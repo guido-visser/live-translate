@@ -69,6 +69,23 @@ def test_ssh_command(tmp_path):
     assert "BatchMode=yes" in cmd and "ExitOnForwardFailure=yes" in cmd
 
 
+@pytest.mark.parametrize("field", ["ssh_user", "ssh_host"])
+def test_a_name_that_would_be_an_ssh_option_is_refused(tmp_path, field):
+    t = Tunnel(tmp_path, 8001)
+    t.settings = REMOTE.model_copy(update={field: "-oProxyCommand=calc"})
+    assert "characters" in t._config_problem()
+    t.settings = REMOTE.model_copy(update={field: "name; calc"})
+    assert "characters" in t._config_problem()
+
+
+def test_ordinary_ssh_names_are_fine(tmp_path, monkeypatch):
+    monkeypatch.setattr(tunnel_module, "ssh_executable", lambda name="ssh": "ssh")
+    t = Tunnel(tmp_path, 8001)
+    for user, host in (("livetranslate", "vps.example.nl"), ("deploy_1", "192.168.1.5"), ("me@corp.local", "2001:db8::1")):
+        t.settings = REMOTE.model_copy(update={"ssh_user": user, "ssh_host": host})
+        assert t._config_problem() == ""
+
+
 def test_ssh_errors_are_explained():
     assert "authorized_keys of livetranslate" in explain("livetranslate@vps: Permission denied (publickey).", REMOTE)
     assert "Port 8800" in explain("Error: remote port forwarding failed for listen port 8800", REMOTE)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -30,6 +31,8 @@ log = logging.getLogger(__name__)
 CONNECTED_AFTER_S = 5.0  # ssh exits within this when the login or the forwarding fails
 HEALTH_EVERY_S = 60.0
 RETRY_S = (5, 10, 30, 60)
+# They go on ssh's command line: a leading "-" would make them an option, which can run commands.
+SAFE_NAME = re.compile(r"\w[\w.:@\-]*")
 
 
 def ssh_executable(name: str = "ssh") -> str | None:
@@ -181,6 +184,8 @@ class Tunnel:
         s = self.settings
         if not (s.ssh_host and s.ssh_user):
             return "Fill in the server and the user."
+        if not (SAFE_NAME.fullmatch(s.ssh_host) and SAFE_NAME.fullmatch(s.ssh_user)):
+            return "The server or the user has characters that can't be in such a name."
         if not self.local_port:
             return "The tunnel port on this PC could not be opened; restart Live Translate."
         if ssh_executable() is None:

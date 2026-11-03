@@ -16,6 +16,10 @@ import httpx
 
 log = logging.getLogger("livetranslate")
 
+# A phone's audio stream never ends by itself; without a limit it would keep the app from
+# closing (and an update's installer waiting) until that phone leaves.
+SHUTDOWN_WAIT_S = 3
+
 # Kept for the life of the process.
 _instance_mutex = None
 _crash_log = None
@@ -90,6 +94,23 @@ def enable_crash_log(path) -> None:
         log.warning("Could not open %s", path, exc_info=True)
 
 
+def make_server(app, port: int):
+    import uvicorn
+
+    # log_config=None: uvicorn's own console logging breaks without a console (pythonw).
+    return uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=port,
+            log_config=None,
+            log_level="warning",
+            ws_ping_interval=20,
+            timeout_graceful_shutdown=SHUTDOWN_WAIT_S,
+        )
+    )
+
+
 def main() -> None:
     console = ensure_streams()
 
@@ -157,15 +178,10 @@ def main() -> None:
 
     setup_cuda_dll_paths()
 
-    import uvicorn
-
     from .server.app import create_app
 
     app = create_app(store, data)
-    # log_config=None: uvicorn's own console logging breaks without a console (pythonw).
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="0.0.0.0", port=port, log_config=None, log_level="warning", ws_ping_interval=20)
-    )
+    server = make_server(app, port)
     log.info("Live Translate is starting. Operator page: %s", admin_url)
 
     # Phones on the network use the main port; the internet tunnel ends on a second port,
