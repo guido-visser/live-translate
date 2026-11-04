@@ -9,22 +9,13 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
-from pathlib import Path
+import threading
+
+from tqdm.auto import tqdm
 
 log = logging.getLogger(__name__)
 
 WHISPER_PATTERNS = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
-
-
-def folder_size(path: Path) -> int:
-    total = 0
-    for file in path.rglob("*"):
-        try:
-            if file.is_file() and not file.is_symlink():
-                total += file.stat().st_size
-        except OSError:  # a download renamed it in the meantime
-            pass
-    return total
 
 
 def repo_size(repo: str, patterns: list[str]) -> int | None:
@@ -45,15 +36,35 @@ class Step:
         self.key = key
         self.state = "waiting"  # waiting | busy | done | error
         self.error = ""
-        self.folder: Path | None = None  # watched for progress while downloading
         self.total: int | None = None
         self.done = 0
 
     def status(self) -> dict:
-        done = self.done
-        if self.folder is not None and self.state == "busy" and self.folder.exists():
-            done = folder_size(self.folder)
-        return {"key": self.key, "state": self.state, "error": self.error, "done": done, "total": self.total}
+        return {"key": self.key, "state": self.state, "error": self.error, "done": self.done, "total": self.total}
+
+
+def counting_bar(step: Step) -> type[tqdm]:
+    """A progress bar for Hugging Face downloads that tells the step instead of a console.
+
+    Looking at the files doesn't work: a large model is hardly on disk until it is nearly complete.
+    Hugging Face keeps two counts, of what came in and of what was written. The first runs ahead
+    but misses small files, the second ends up complete, so the step shows whichever is further.
+    """
+    lock = threading.Lock()
+
+    class CountingBar(tqdm):
+        def __init__(self, *args, **kwargs) -> None:
+            self.counts_bytes = kwargs.get("unit") == "B"
+            self.counted = 0
+            super().__init__(*args, **{**kwargs, "disable": True})
+
+        def update(self, n: float | None = 1) -> None:
+            if self.counts_bytes and n:
+                with lock:
+                    self.counted += int(n)
+                    step.done = max(step.done, self.counted)
+
+    return CountingBar
 
 
 class Preparation:
@@ -102,15 +113,18 @@ class Preparation:
                 step.state, step.error = "error", str(exc)
 
     async def _speech(self, step: Step) -> None:
-        from faster_whisper.utils import _MODELS, download_model
+        from faster_whisper.utils import _MODELS
+        from huggingface_hub import snapshot_download
 
         pipeline = self.services.pipeline
         model = self.services.settings.asr.model
         pipeline.models_dir.mkdir(parents=True, exist_ok=True)
         repo = _MODELS.get(model, model)
         step.total = await asyncio.to_thread(repo_size, repo, WHISPER_PATTERNS)
-        step.folder = pipeline.models_dir / f"models--{repo.replace('/', '--')}"
-        await asyncio.to_thread(download_model, model, cache_dir=str(pipeline.models_dir))
+        # What faster-whisper's download_model does, which keeps the progress to itself.
+        await asyncio.to_thread(
+            snapshot_download, repo, cache_dir=str(pipeline.models_dir), allow_patterns=WHISPER_PATTERNS, tqdm_class=counting_bar(step)
+        )
 
     async def _translation(self, step: Step) -> None:
         from .translate.nllb import DOWNLOAD_PATTERNS, MODELS
@@ -119,8 +133,11 @@ class Preparation:
         if translator.active is translator.nllb:
             repo = MODELS[translator.nllb.model]
             step.total = await asyncio.to_thread(repo_size, repo, DOWNLOAD_PATTERNS)
-            step.folder = translator.nllb.models_dir / repo.replace("/", "--")
-        await translator.start()
+            translator.nllb.download_bar = counting_bar(step)
+        try:
+            await translator.start()
+        finally:
+            translator.nllb.download_bar = None
         if translator.status == "error":
             raise RuntimeError(translator.detail)
         self.services.hub.to_listeners(self.services.languages_message())

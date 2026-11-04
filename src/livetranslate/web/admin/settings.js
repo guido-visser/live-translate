@@ -9,7 +9,12 @@
   let vmixState = null; // inputs reported by vMix
   let obsState = null; // text sources and scenes reported by OBS
   let glossary = []; // every glossary entry (all spoken languages), edited in place
-  let dirty = false;
+  let dirty = false; // changes the server doesn't have yet
+  let saving = null; // the save under way
+  let saveAgain = false;
+  let saveFailed = false;
+  let saveTimer = null;
+  let savedTimer = null;
 
   // -- tabs --------------------------------------------------------------------------
 
@@ -245,7 +250,7 @@
     const text = $("glossarySample").value.trim();
     const box = $("glossaryResult");
     if (!text) return;
-    if (dirty) await save();
+    await saveFirst();
     box.textContent = "";
     try {
       const result = await api("/api/admin/glossary/test", { method: "POST", body: JSON.stringify({ text }) });
@@ -351,7 +356,7 @@
   $("vmixRefresh").addEventListener("click", refreshVmix);
   $("vmixInput").addEventListener("change", () => { $("vmixField").value = ""; renderVmixFields(); });
   $("vmixTest").addEventListener("click", async () => {
-    if (dirty) await save();
+    await saveFirst();
     try {
       await api("/api/admin/vmix/test", { method: "POST", body: JSON.stringify({ text: t("vmixTestText") }) });
       showVmixStatus(true);
@@ -409,8 +414,7 @@
   }
 
   async function refreshObs() {
-    const s = state.settings.obs;
-    if ($("obsHost").value.trim() !== s.host || Number($("obsPort").value) !== s.port || $("obsPassword").value !== s.password) await save();
+    await saveFirst();
     try {
       obsState = await api("/api/admin/obs/inputs");
       showObsStatus(true);
@@ -423,7 +427,7 @@
 
   $("obsRefresh").addEventListener("click", refreshObs);
   $("obsTest").addEventListener("click", async () => {
-    if (dirty) await save();
+    await saveFirst();
     try {
       await api("/api/admin/obs/test", { method: "POST", body: JSON.stringify({ text: t("vmixTestText") }) });
       showObsStatus(true);
@@ -900,6 +904,7 @@
   });
 
   $("setupAgain").addEventListener("click", async () => {
+    await saveFirst();
     await api("/api/admin/setup/again", { method: "POST" });
     dirty = false;
     location.href = withPin("/admin/setup?again=1");
@@ -909,6 +914,7 @@
     if (!confirm(t("aboutMoveConfirm"))) return;
     $("moveStatus").className = "small";
     try {
+      await saveFirst();
       await api("/api/admin/data/move", { method: "POST" });
       dirty = false;
       $("moveData").disabled = true;
@@ -919,31 +925,112 @@
     }
   });
 
+  // -- saving by itself -------------------------------------------------------------------------
+
+  // A choice is saved right away, with a moment's wait so that ticking a few languages is one save.
+  // Typed text is saved when leaving the field or pressing Enter: half a server address or PIN must
+  // never take effect. The page isn't redrawn afterwards, because the operator may be busy in it.
+  const SAVE_DELAY_MS = 800;
+  const SAVED_SHOWN_MS = 2500;
+
   function markDirty() {
     dirty = true;
-    $("saved").hidden = true;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, SAVE_DELAY_MS);
   }
 
-  async function save() {
-    $("saveError").hidden = true;
+  // A file source without a file has nothing to translate from yet: wait for the file.
+  const canSave = () => kind() !== "file" || Boolean($("filePath").value.trim());
+
+  const lists = () => JSON.stringify([state.target_languages, state.source_languages, state.quick_language_options, state.tts_languages]);
+
+  function afterSave(old) {
+    if (lists() !== old.lists) {
+      renderSourceLanguages();
+      renderTargets();
+      renderQuick();
+    }
+    if (JSON.stringify(state.settings.target_languages) !== old.targets) {
+      renderVmixLanguages();
+      renderObsLanguages();
+    }
+    if (state.settings.public_host !== old.host) renderAddresses();
+    renderTunnel();
+    $("saved").textContent = t("saved");
+    $("saved").hidden = false;
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => ($("saved").hidden = true), SAVED_SHOWN_MS);
+  }
+
+  async function send() {
+    clearTimeout(saveTimer);
+    if (!canSave()) return;
+    dirty = false;
+    const old = { lists: lists(), targets: JSON.stringify(state.settings.target_languages), host: state.settings.public_host };
     try {
       state = await window.LT.saveSettings(collect());
     } catch (err) {
-      $("saveError").textContent = err.message;
+      dirty = saveFailed = true;
+      $("saved").hidden = true;
+      $("saveError").textContent = t("notSaved").replace("{error}", err.message);
       $("saveError").hidden = false;
       return;
     }
-    fill();
-    $("saved").textContent = t("saved");
-    $("saved").hidden = false;
+    saveFailed = false;
+    $("saveError").hidden = true;
+    afterSave(old);
   }
 
-  // The test sentence and the search fields are not settings, and calibrating saves its own.
-  const isSetting = (e) => e.target.id !== "glossarySample" && e.target.type !== "search" && !e.target.closest("#calibration");
-  form.addEventListener("input", (e) => isSetting(e) && markDirty());
+  // One at a time, in order, and the last one has everything.
+  function save() {
+    if (saving) {
+      saveAgain = true;
+      return saving;
+    }
+    saving = (async () => {
+      do {
+        saveAgain = false;
+        await send();
+      } while (saveAgain);
+      saving = null;
+    })();
+    return saving;
+  }
+
+  // For what acts on the settings: a test, a refresh, leaving the page.
+  function saveFirst() {
+    return dirty || saving ? save() : Promise.resolve();
+  }
+  window.LT.beforeClosing = saveFirst;
+
+  // The test sentence, the search fields and file pickers are not settings, and calibrating saves its own.
+  const isSetting = (e) => e.target.id !== "glossarySample" && !["search", "file"].includes(e.target.type) && !e.target.closest("#calibration");
+  const isTyped = (el) => el.matches?.("input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file])");
+  form.addEventListener("input", (e) => {
+    if (!isSetting(e) || !isTyped(e.target)) return;
+    dirty = true;
+    $("saved").hidden = true;
+  });
   form.addEventListener("change", (e) => isSetting(e) && markDirty());
-  form.addEventListener("submit", (e) => { e.preventDefault(); save(); });
-  window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
+  form.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !isTyped(e.target) || !isSetting(e)) return;
+    e.preventDefault();
+    saveFirst();
+  });
+  form.addEventListener("submit", (e) => e.preventDefault());
+
+  // Back to the main screen only once it is saved, so that screen shows the new settings.
+  document.querySelector("header a").addEventListener("click", async (e) => {
+    document.activeElement?.blur?.();
+    if (!dirty && !saving) return;
+    e.preventDefault();
+    await saveFirst();
+    if (!saveFailed) location.href = e.currentTarget?.href || withPin("/admin");
+  });
+  window.addEventListener("pagehide", () => {
+    if (dirty && canSave()) window.LT.saveSettings(collect()).catch(() => {});
+  });
+  window.addEventListener("beforeunload", (e) => { if (saveFailed) e.preventDefault(); });
 
   // Live level meter, so the input can be checked while choosing it.
   function connect() {

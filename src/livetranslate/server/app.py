@@ -355,6 +355,16 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         require_admin(request)
         return await asyncio.to_thread(list_all)
 
+    # The settings page saves by itself, so saves can follow each other closely.
+    translation_turn, pipeline_turn, tunnel_turn = asyncio.Lock(), asyncio.Lock(), asyncio.Lock()
+
+    def in_turn(lock: asyncio.Lock, job) -> None:
+        async def run():
+            async with lock:
+                await job()
+
+        asyncio.create_task(run())
+
     @app.post("/api/admin/settings")
     async def save_settings(request: Request):
         require_admin(request)
@@ -380,7 +390,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             await services.translator.apply(old, new)
             services.hub.to_listeners(services.languages_message())
 
-        asyncio.create_task(apply_translation())
+        in_turn(translation_turn, apply_translation)
         if new.source_language != old.source_language or new.vmix.url != old.vmix.url:
             services.pipeline.speaker_language = new.source_language
             services.vmix.previous = None
@@ -391,9 +401,9 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         audio_changed = new.audio.model_copy(update={"gain": old.audio.gain}) != old.audio
         restart_on = (new.asr, new.source_language, new.gpu_helpers, new.service_log)
         if audio_changed or restart_on != (old.asr, old.source_language, old.gpu_helpers, old.service_log):
-            asyncio.create_task(services.pipeline.restart())
+            in_turn(pipeline_turn, services.pipeline.restart)
         if new.remote != old.remote:
-            asyncio.create_task(services.tunnel.apply(new.remote))
+            in_turn(tunnel_turn, lambda: services.tunnel.apply(new.remote))
         services.hub.to_listeners(services.languages_message())
         return admin_state()
 

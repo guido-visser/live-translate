@@ -90,6 +90,8 @@ Tap **Listen** to hear the translation through earphones; it keeps playing with 
 
 ## Settings
 
+Everything you change is saved by itself, and **Saved ✓** appears at the top. Typed text is saved when you leave the field or press Enter.
+
 Press **Settings** at the top of the main screen. These are the ones you are most likely to use.
 
 ### Church: name, profile and song detection

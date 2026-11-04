@@ -197,12 +197,7 @@ input[type=range] { width: 100%; }
 .targets { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 12px; max-height: 320px; overflow-y: auto; margin-bottom: 12px; }
 .check { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 8px; }
 .inline-buttons { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
-.save-bar {
-  position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 12px;
-  margin: 16px -16px -16px; padding: 12px 16px; background: var(--surface);
-  border-top: 1px solid var(--border); border-radius: 0 0 12px 12px;
-}
-.save-bar .error { margin: 0; }
+.save-status { margin: 0 8px 0 0; }
 .glossary-wrap { overflow-x: auto; margin-bottom: 4px; }
 .glossary { width: 100%; border-collapse: collapse; }
 .glossary th { font-size: 13px; color: var(--muted); font-weight: 600; text-align: left; padding: 0 6px 6px 0; white-space: nowrap; }
@@ -264,7 +259,7 @@ input[type=search] { width: 100%; padding: 7px 10px; border: 1px solid var(--bor
 .wizard-row-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 5px; font-weight: 600; }
 .wizard-row.waiting { opacity: 0.6; }
 .wizard-progress { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; position: relative; }
-.wizard-progress div { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width 1s linear; }
+.wizard-progress div { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width 0.5s linear; }
 .wizard-row.done .wizard-progress div { background: var(--ok); }
 .wizard-row.error .wizard-progress div { background: var(--danger); }
 .wizard-progress div.unknown { position: absolute; width: 35%; animation: wizard-slide 1.4s ease-in-out infinite; }

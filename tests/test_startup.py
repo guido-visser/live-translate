@@ -150,6 +150,26 @@ def test_every_language_can_be_chosen_not_only_the_loaded_ones(tmp_path):
     assert "am" in state["catalogs"]["nllb"] and "am" not in state["catalogs"]["libretranslate"]
 
 
+def test_download_progress_follows_the_furthest_count_of_bytes():
+    from livetranslate.firstrun import Step, counting_bar
+
+    step = Step("speech")
+    bar = counting_bar(step)
+    received = bar(total=0, unit="B", desc="Downloading bytes")
+    written = bar(total=0, unit="B", desc="Reconstructing")
+    files = bar(total=4, desc="Fetching 4 files")
+
+    received.update(500)
+    assert step.status()["done"] == 500
+    written.update(200)  # behind what came in, and the two aren't added up
+    files.update(1)  # files, not bytes
+    assert step.done == 500
+    written.update(400)
+    assert step.done == 600
+    received.update(-500)  # starting a file over doesn't make the bar run back
+    assert step.done == 600
+
+
 def test_preparation_downloads_what_was_chosen_and_reports_failures(tmp_path, monkeypatch):
     import time
 

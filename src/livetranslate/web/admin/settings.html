@@ -12,6 +12,8 @@
     <a class="icon-btn" href="/admin" data-pin-link><span aria-hidden="true">←</span> <span data-t="back"></span></a>
     <h1 data-t="settings"></h1>
     <div class="top-actions">
+      <span id="saved" class="muted small save-status" role="status" hidden></span>
+      <span id="saveError" class="error small save-status" role="alert" hidden></span>
       <select id="uiLang" aria-label="Language">
         <option value="nl">NL</option>
         <option value="en">EN</option>
@@ -511,12 +513,6 @@
           <button id="setupAgain" type="button" data-t="aboutSetupButton"></button>
         </div>
       </section>
-
-      <div class="save-bar">
-        <span id="saved" class="muted" hidden></span>
-        <span id="saveError" class="error" hidden></span>
-        <button class="primary" type="submit" data-t="save"></button>
-      </div>
     </form>
   </main>
 

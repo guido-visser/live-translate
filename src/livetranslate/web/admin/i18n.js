@@ -1,6 +1,6 @@
 window.ADMIN_I18N = {
   nl: {
-    settings: "Instellingen", back: "Terug", save: "Opslaan", saved: "Opgeslagen ✓", close: "Sluiten",
+    settings: "Instellingen", back: "Terug", saved: "Opgeslagen ✓", notSaved: "Niet opgeslagen: {error}", close: "Sluiten",
     qr: "QR-code", qrTitle: "Live vertaling", fullscreen: "Volledig scherm",
     start: "Start vertaling", stop: "Stop vertaling", pause: "Pauze", resume: "Hervatten",
     stopped: "Gestopt", loading: "Model laden…", running: "Bezig", paused: "Gepauzeerd",
@@ -106,7 +106,7 @@ window.ADMIN_I18N = {
     createKey: "Sleutel maken", copy: "Kopiëren", copied: "Gekopieerd",
   },
   en: {
-    settings: "Settings", back: "Back", save: "Save", saved: "Saved ✓", close: "Close",
+    settings: "Settings", back: "Back", saved: "Saved ✓", notSaved: "Not saved: {error}", close: "Close",
     qr: "QR code", qrTitle: "Live translation", fullscreen: "Full screen",
     start: "Start translating", stop: "Stop translating", pause: "Pause", resume: "Resume",
     stopped: "Stopped", loading: "Loading model…", running: "Running", paused: "Paused",
@@ -212,7 +212,7 @@ window.ADMIN_I18N = {
     createKey: "Create key", copy: "Copy", copied: "Copied",
   },
   ru: {
-    settings: "Настройки", back: "Назад", save: "Сохранить", saved: "Сохранено ✓", close: "Закрыть",
+    settings: "Настройки", back: "Назад", saved: "Сохранено ✓", notSaved: "Не сохранено: {error}", close: "Закрыть",
     qr: "QR-код", qrTitle: "Синхронный перевод", fullscreen: "На весь экран",
     start: "Начать перевод", stop: "Остановить перевод", pause: "Пауза", resume: "Продолжить",
     stopped: "Остановлено", loading: "Загрузка модели…", running: "Работает", paused: "Пауза",
@@ -318,7 +318,7 @@ window.ADMIN_I18N = {
     createKey: "Создать ключ", copy: "Копировать", copied: "Скопировано",
   },
   uk: {
-    settings: "Налаштування", back: "Назад", save: "Зберегти", saved: "Збережено ✓", close: "Закрити",
+    settings: "Налаштування", back: "Назад", saved: "Збережено ✓", notSaved: "Не збережено: {error}", close: "Закрити",
     qr: "QR-код", qrTitle: "Синхронний переклад", fullscreen: "На весь екран",
     start: "Почати переклад", stop: "Зупинити переклад", pause: "Пауза", resume: "Продовжити",
     stopped: "Зупинено", loading: "Завантаження моделі…", running: "Працює", paused: "Пауза",

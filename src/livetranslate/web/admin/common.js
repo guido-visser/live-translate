@@ -50,7 +50,9 @@ window.LT = (() => {
   }
 
   function saveSettings(settings) {
-    return api("/api/admin/settings", { method: "POST", body: JSON.stringify(settings) });
+    const body = JSON.stringify(settings);
+    // keepalive: it still arrives when the page is being left. Browsers refuse it above 64 KB.
+    return api("/api/admin/settings", { method: "POST", body, keepalive: body.length < 60000 });
   }
 
   // Language names in the interface language ("Duits" in Dutch, "German" in English…).
@@ -185,7 +187,9 @@ window.LT = (() => {
       return;
     }
     let action = "tray";
+    document.activeElement?.blur?.();  // what is being typed counts too
     try {
+      await window.LT.beforeClosing?.();
       action = (await api("/api/admin/close")).action;
     } catch {
       window.pywebview.api.close_window();

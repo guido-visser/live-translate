@@ -114,6 +114,7 @@ class NllbTranslator:
         self._cache: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self._lock = asyncio.Lock()
         self._model_lock = threading.Lock()
+        self.download_bar = None  # who hears about the download's progress; see firstrun.py
         self.configure(settings)
 
     @property
@@ -150,7 +151,7 @@ class NllbTranslator:
             self.status = "installing"
             self.detail = f"Downloading NLLB {self.model} (one time, needs internet)…"
             log.info("Downloading %s", repo)
-            snapshot_download(repo, local_dir=folder, allow_patterns=DOWNLOAD_PATTERNS)
+            snapshot_download(repo, local_dir=folder, allow_patterns=DOWNLOAD_PATTERNS, tqdm_class=self.download_bar)
         self.status, self.detail = "starting", f"Loading NLLB {self.model}…"
 
         setup_cuda_dll_paths()

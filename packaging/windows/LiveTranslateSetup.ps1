@@ -70,8 +70,8 @@ function Use-DataFolder($folder) {
     $script:updating = @(Get-ChildItem $env:UV_PROJECT_ENVIRONMENT -Filter ".installed-*" -Force -ErrorAction SilentlyContinue).Count -gt 0
 }
 
-# What the download cache and Python come to after a complete first start. Installing from the
-# cache is quick and mostly links the same files, so the two downloads are what the bar shows.
+# What uv writes during a complete first start: Python and the packages, unpacked in its cache.
+# Installing from the cache is quick and only links those files, so this is what the bar shows.
 $ExpectedBytes = 2.43GB
 # Software, speech and translation models and voices, as Explorer adds them up; needs some room to spare.
 $NeededBytes = 8GB
@@ -340,26 +340,36 @@ $window.Icon = $icon
 (Named "Logo").Source = $icon
 $stage.Text = $T.preparing
 
-$shared = [hashtable]::Synchronized(@{ bytes = 0L; stop = $false; folders = @() })
+$shared = [hashtable]::Synchronized(@{ bytes = 0L; stop = $false; folders = @(); installer = 0; earlier = 0L })
 
 function Start-Counting {
-    # Counting the folders can take a moment on a slow disk, so that happens beside the window.
+    # Counting can take a moment on a slow disk, so that happens beside the window.
     $counter = [powershell]::Create()
     [void]$counter.AddScript({
         param($shared)
         while (-not $shared.stop) {
-            $total = 0L
-            foreach ($folder in $shared.folders) {
-                if ([IO.Directory]::Exists($folder)) {
-                    try {
-                        foreach ($file in [IO.Directory]::EnumerateFiles($folder, "*", [IO.SearchOption]::AllDirectories)) {
-                            try { $total += ([IO.FileInfo]$file).Length } catch {}
-                        }
-                    } catch {}
+            if ($shared.folders.Count -gt 0) {
+                $total = 0L
+                foreach ($folder in $shared.folders) {
+                    if ([IO.Directory]::Exists($folder)) {
+                        try {
+                            foreach ($file in [IO.Directory]::EnumerateFiles($folder, "*", [IO.SearchOption]::AllDirectories)) {
+                                try { $total += ([IO.FileInfo]$file).Length } catch {}
+                            }
+                        } catch {}
+                    }
                 }
+                $shared.bytes = $total
+                Start-Sleep -Seconds 2
+                continue
             }
-            $shared.bytes = $total
-            Start-Sleep -Seconds 2
+            # Never look through uv's folders while it runs: it can't rename a folder that is being
+            # read ("Access is denied"). Windows keeps count of what each program writes anyway.
+            try {
+                $running = @(Get-CimInstance Win32_Process -Filter "Name='uv.exe' AND ParentProcessId=$($shared.installer)")
+                if ($running.Count -gt 0) { $shared.bytes = $shared.earlier + [long]$running[0].WriteTransferCount }
+            } catch {}
+            Start-Sleep -Milliseconds 500
         }
     }).AddArgument($shared)
     [void]$counter.BeginInvoke()
@@ -379,7 +389,9 @@ function Start-Sync {
     $info.Arguments = "/c `"`"$uv`" sync --frozen --no-dev --no-editable --color never --project `"$app\.`" >> `"$log`" 2>&1`""
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
+    $shared.earlier = $shared.bytes  # what an attempt before this one already wrote
     $script:process = [Diagnostics.Process]::Start($info)
+    $shared.installer = $script:process.Id
 }
 
 function Begin-Setup {
@@ -390,7 +402,6 @@ function Begin-Setup {
     $bar.IsIndeterminate = $updating
     $script:phase = "syncing"
     Remove-Item $log -ErrorAction SilentlyContinue
-    $shared.folders = @($env:UV_CACHE_DIR, $env:UV_PYTHON_INSTALL_DIR)
     Start-Counting
     Start-Sync
     $timer.Start()
@@ -517,6 +528,7 @@ function On-MoveTick {
         if ($script:process.ExitCode -ge 8) { Show-Failure; return }  # below 8 robocopy succeeded
         if ($script:copies.Count -gt 0) { Start-NextCopy; return }
         $script:moveStep = "sync"
+        $shared.folders = @()  # uv is about to work in there
         $script:phase = "syncing"
         $script:attempt = 0
         $bar.IsIndeterminate = $true
@@ -729,6 +741,12 @@ function Format-Size($bytes) {
     return "{0:0} MB" -f ($bytes / 1MB)
 }
 
+function Move-Bar($percent) {
+    # The count arrives in steps; the bar glides to it in the time until the next one.
+    $glide = New-Object Windows.Media.Animation.DoubleAnimation($percent, [Windows.Duration]$timer.Interval)
+    $bar.BeginAnimation([Windows.Controls.ProgressBar]::ValueProperty, $glide)
+}
+
 function Test-AppIsUp {
     $port = 8000
     try { $port = (Get-Content (Join-Path $base "settings.json") -Raw -Encoding UTF8 | ConvertFrom-Json).port } catch {}
@@ -744,6 +762,7 @@ function Start-TheApp {
     $script:exitCode = 0
     $script:startedApp = Get-Date
     $bar.IsIndeterminate = $false
+    $bar.BeginAnimation([Windows.Controls.ProgressBar]::ValueProperty, $null)  # or it holds on to the last value
     $bar.Value = 100
     $amount.Text = ""
     $stage.Text = $T.starting
@@ -758,11 +777,10 @@ function On-Tick {
     }
     if ($script:phase -in "waiting", "copying", "cleaning") { On-MoveTick; return }
     if (-not $updating) {
-        # Never backwards: a package's temporary files disappear when it is unpacked.
-        $share = [Math]::Min(0.98, $shared.bytes / $ExpectedBytes)
-        if ($share -gt $script:shown) { $script:shown = $share }
-        $bar.Value = $script:shown * 100
-        $amount.Text = $T.of -f (Format-Size ($script:shown * $ExpectedBytes)), (Format-Size $ExpectedBytes)
+        $script:shown = [Math]::Min(0.98, $shared.bytes / $ExpectedBytes)
+        Move-Bar ($script:shown * 100)
+        # Only MB: the text would change once per 100 MB in GB.
+        $amount.Text = $T.of -f ("{0:N0} MB" -f ($script:shown * $ExpectedBytes / 1MB)), ("{0:N0} MB" -f ($ExpectedBytes / 1MB))
     }
     if (-not $moving) { $stage.Text = Read-Stage }
     if (-not $script:process.HasExited) { return }

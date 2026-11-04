@@ -253,7 +253,7 @@
 
   // -- preparing ---------------------------------------------------------------------------------
 
-  const size = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`);
+  const megabytes = (bytes) => Math.round(bytes / 1e6).toLocaleString(window.LT.lang); // not GB: 0.1 GB is a long wait
 
   function preparationRow() {
     const row = document.createElement("div");
@@ -290,16 +290,24 @@
       }
     }
     for (const item of status.steps) {
-      const { row, name, detail, fill, more, summary, message } = prepareRows.get(item.key);
+      const parts = prepareRows.get(item.key);
+      const { row, name, detail, fill, more, summary, message } = parts;
       row.className = `wizard-row ${item.state}`;
       name.textContent = t(`wizPrep_${item.key}`);
       detail.textContent = "";
       if (item.state === "done") detail.textContent = "✓";
       else if (item.state === "waiting") detail.textContent = t("wizWaiting");
-      else if (item.state === "busy" && item.total) detail.textContent = `${size(Math.min(item.done, item.total))} / ${size(item.total)}`;
+      else if (item.state === "busy" && item.total) detail.textContent = `${megabytes(Math.min(item.done, item.total))} / ${megabytes(item.total)} MB`;
       else if (item.state === "busy") detail.textContent = t("wizWorking");
-      fill.className = item.state === "busy" && !item.total ? "unknown" : "";
-      fill.style.width = item.state === "done" ? "100%" : item.total ? `${Math.min(100, (item.done / item.total) * 100)}%` : "";
+      const unknown = item.state === "busy" && !item.total;
+      const share = item.state === "done" ? 100 : item.total ? Math.min(100, (item.done / item.total) * 100) : 0;
+      // Only progress glides. From the "busy" look, or when starting over, the bar would run backwards.
+      const jump = unknown || fill.className === "unknown" || share < (parts.share ?? 0);
+      fill.style.transition = jump ? "none" : "";
+      fill.className = unknown ? "unknown" : "";
+      fill.style.width = unknown ? "" : `${share}%`;
+      if (jump) void fill.offsetWidth; // makes the jump happen before the transition is back
+      parts.share = share;
       more.hidden = item.state !== "error";
       summary.textContent = t("wizErrorDetails");
       message.textContent = item.error;
@@ -326,7 +334,7 @@
       } catch { /* the next tick tries again */ }
     };
     tick();
-    polling = setInterval(tick, 1000);
+    polling = setInterval(tick, 500);
   }
 
   async function finish() {
