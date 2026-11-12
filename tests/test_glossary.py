@@ -91,7 +91,8 @@ async def test_nllb_gets_a_placeholder_for_a_name():
 
 def test_hotwords_per_spoken_language_in_list_order():
     glossary = Glossary(ENTRIES)
-    assert glossary.hotwords("nl") == "gemeente, gemeenten, heilig avondmaal, avondmaal, Heer, Jansen, diaken"
+    # "heilig avondmaal" holds "avondmaal": the shorter one is enough for Whisper.
+    assert glossary.hotwords("nl") == "gemeente, gemeenten, avondmaal, Heer, Jansen, diaken"
     assert glossary.hotwords("ru") == "церковь"
     assert glossary.hotwords("uk") == ""
 
@@ -147,3 +148,41 @@ async def test_real_nllb_uses_the_glossary():
     assert "церк" not in without.lower()  # NLLB alone says "municipality"
     assert "церк" in (await service.translate("Welkom in de gemeente.", "nl", "ru")).lower()
     await service.close()
+
+
+def test_hotwords_name_each_word_once():
+    # The church's list gave Whisper "..., Kandelaar, Amen, De Kandelaar, de Kandelaar", and over
+    # music it wrote "De Kandelaar, de Kandelaar, ..." dozens of times.
+    glossary = Glossary(
+        [
+            GlossaryEntry(term="Heer", translations={"en": "Lord"}),
+            GlossaryEntry(term="Kandelaar", translations={"en": "Kandelaar"}),
+            GlossaryEntry(term="Amen", translations={"en": "Amen"}),
+            GlossaryEntry(term="De Kandelaar, de Kandelaar", translations={"en": "De Kandelaar"}),
+        ]
+    )
+    assert glossary.hotwords("nl") == "Heer, Kandelaar, Amen"
+
+
+def test_a_line_of_only_glossary_words_is_whisper_copying_its_list():
+    glossary = Glossary(
+        [
+            GlossaryEntry(term="Kandelaar", translations={"en": "Kandelaar"}),
+            GlossaryEntry(term="Amen", translations={"en": "Amen"}),
+            GlossaryEntry(term="De Kandelaar, de Kandelaar", translations={"en": "De Kandelaar"}),
+        ]
+    )
+    assert glossary.only_repeats("De Kandelaar, de Kandelaar, de Kandelaar.", "nl")
+    assert glossary.only_repeats("Kandelaar, de Kandelaar, " * 20, "nl")
+    assert glossary.only_repeats("Amen, De Kandelaar, de Kandelaar,", "nl")
+    assert not glossary.only_repeats("Amen.", "nl")  # said after every prayer
+    assert not glossary.only_repeats("Want God wil zijn vuur uitbreiden, ook in De Kandelaar.", "nl")
+    assert not glossary.only_repeats("De Kandelaar, de Kandelaar.", "ru")
+
+
+async def test_a_line_of_only_names_is_not_translated():
+    # NLLB lost the placeholders of "[1], [2], [3]." and the retry said "The candlestick, ...".
+    service = make_service("nllb", lambda text: "")
+    service.glossary = Glossary([GlossaryEntry(term="De Kandelaar, de Kandelaar", translations={"en": "De Kandelaar"})])
+    assert await service.translate("De Kandelaar, de Kandelaar.", "nl", "en") == "De Kandelaar, de Kandelaar."
+    assert service.calls == []

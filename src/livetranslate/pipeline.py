@@ -20,7 +20,7 @@ from .integrations.subtitles import SubtitleOutput
 from .integrations.vmix import VmixOutput
 from .server.hub import Hub
 from .servicelog import ServiceLog
-from .stt.sound import SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundClassifier, song_chance
+from .stt.sound import SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundClassifier, is_music, song_chance
 from .stt.transcriber import StreamingTranscriber, WhisperEngine
 from .translate.service import TranslationService
 from .tts.piper import SpeechService
@@ -273,13 +273,23 @@ class Pipeline:
         def on_sentence(text: str) -> None:
             loop.call_soon_threadsafe(self._sentences.put_nowait, (text, time.time(), engine.language))
 
+        music = False  # the latest sound check heard mostly music, and no speech
+
         def transcribe(audio: np.ndarray, prompt: str):
+            # Over music Whisper hears no words and writes down the glossary words it was given
+            # instead ("De Kandelaar, de Kandelaar, ..."), so it only gets them when someone talks.
             # Read per pass, so glossary changes apply without a restart.
-            return engine.transcribe(audio, prompt, self.translator.glossary.hotwords(engine.language))
+            hotwords = "" if music else self.translator.glossary.hotwords(engine.language)
+            return engine.transcribe(audio, prompt, hotwords)
+
+        def is_noise(text: str) -> bool:
+            return self.translator.glossary.only_repeats(text, engine.language)
 
         gate = SingingGate()
 
         def is_singing(audio: np.ndarray) -> bool:
+            nonlocal music
+            music = False
             if self._sound is None:
                 return False
             try:
@@ -289,6 +299,7 @@ class Pipeline:
                 log.exception("The sound classifier failed; songs won't be skipped")
                 self._sound = None
                 return False
+            music = is_music(scores)
             # Both read per pass: calibrating and training apply right away.
             model = self.settings.song_model
             chance = None
@@ -324,7 +335,7 @@ class Pipeline:
 
         engine.on_segment = on_segment if self.service_log is not None else None
         transcriber = StreamingTranscriber(
-            transcribe, engine.has_speech, on_partial, on_sentence, self.settings.asr, is_singing
+            transcribe, engine.has_speech, on_partial, on_sentence, self.settings.asr, is_singing, is_noise
         )
         was_paused = False
         while not self._stop.is_set():

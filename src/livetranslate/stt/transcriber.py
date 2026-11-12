@@ -50,6 +50,8 @@ CAPTION_LINKS = {"en", "de", "het", "and", "the", "и", "і", "та"}
 CAPTION_MIN_CAPITALS = 5  # shorter words in capitals may be real ("EO", "HGJB")
 
 MAX_REPEATS = 2  # the same sentence this many extra times in a row is dropped from then on
+LOOP_MIN_WORDS = 12  # a sentence this long ...
+LOOP_SHARE = 4  # ... with only one different word in this many is Whisper looping
 SOUND_WINDOW_S = 2.0  # audio the singing check looks at; keep in step with sound.WINDOW_S
 SONG_NOTICED_AFTER_S = 4.0  # a song has been going for about this long when the check is sure
 
@@ -78,6 +80,16 @@ def is_caption(text: str) -> bool:
         return True
     words = set(re.findall(r"\w+", text.lower()))
     return bool(words & CAPTION_WORDS) and words <= CAPTION_WORDS | CAPTION_LINKS
+
+
+def is_loop(text: str) -> bool:
+    """Whisper stuck in a loop within one sentence: a few words over and over.
+
+    "Kandelaar, de Kandelaar, de Kandelaar, ..." forty times, cut off mid-word. Nobody talks
+    like that: a long sentence with at most one new word in every LOOP_SHARE words.
+    """
+    words = re.findall(r"\w+", text.lower())
+    return len(words) >= LOOP_MIN_WORDS and len(set(words)) * LOOP_SHARE <= len(words)
 
 
 def join_words(words: list[Word]) -> str:
@@ -146,13 +158,16 @@ class StreamingTranscriber:
         on_sentence: Callable[[str], None],
         settings: AsrSettings,
         is_singing: SpeechFn | None = None,
+        is_noise: Callable[[str], bool] | None = None,
     ) -> None:
+        """is_noise: a sentence Whisper made up, dropped (and kept out of the prompt)."""
         self.transcribe = transcribe
         self.has_speech = has_speech
         self.on_partial = on_partial
         self.on_sentence = on_sentence
         self.settings = settings
         self.is_singing = is_singing
+        self.is_noise = is_noise
         self._in_song = False
         self._last_text = ""
         self._repeats = 0
@@ -282,6 +297,9 @@ class StreamingTranscriber:
         self.last_sentence_end = words[-1].end
         if not text or not _norm(text):
             return
+        if is_loop(text) or (self.is_noise is not None and self.is_noise(text)):
+            log.info("Dropped a made-up sentence: %r", text[:120])
+            return  # also out of the prompt: there it would pull Whisper towards more of it
         # Whisper can get stuck on one phrase ("Heerlijk." dozens of times). Saying a word
         # twice is normal; a third time in a row isn't worth showing.
         same = _norm(text) == self._last_text

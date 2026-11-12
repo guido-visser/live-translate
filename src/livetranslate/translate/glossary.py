@@ -31,6 +31,8 @@ from ..config import GlossaryEntry
 HINT = "en"  # the language whose word stands in for languages without their own translation
 PLACEHOLDER = re.compile(r"[{\[(]\s*(\d+)\s*[}\])]")
 GLUED = re.compile(r"(?<=\w)(?=[{\[(]\s*\d+\s*[}\])])")
+LINK_WORDS = {"de", "het", "een", "en", "the", "a", "an", "and", "и", "і", "та"}  # allowed between repeats
+LETTERS = re.compile(r"[^\W\d_]")
 DOUBLE_ARTICLE = re.compile(r"\b(?:the|a|an)\s+(the|a|an)\b(?=\s)", re.IGNORECASE)
 
 
@@ -43,6 +45,21 @@ def _form_pattern(form: str) -> str:
     # Lowercase forms match any capitalisation (also at the start of a sentence);
     # forms with a capital only match exactly, so "heer" (Mr.) is not "Heer" (Lord).
     return f"(?i:{pattern})" if form == form.lower() else pattern
+
+
+def _hotword_list(forms: Iterable[str]) -> str:
+    """Each word once, in list order (Whisper only reads the start of a long list).
+
+    Whisper copies this list when it hears no words, as over music. "De Kandelaar, de Kandelaar"
+    in the list came out as "De Kandelaar, de Kandelaar, ..." dozens of times. So a form that
+    differs only in capitals, or holds a shorter form ("De Kandelaar" holds "Kandelaar"), is left out.
+    """
+    unique: dict[str, str] = {}
+    for form in forms:
+        unique.setdefault(form.casefold(), form)
+    words = {key: set(re.findall(r"\w+", key)) for key in unique}
+    kept = [form for key, form in unique.items() if not any(other and other < words[key] for other in words.values())]
+    return ", ".join(kept)
 
 
 def is_name(entry: GlossaryEntry) -> bool:
@@ -60,8 +77,7 @@ class Glossary:
             for form in _forms(entry.term):
                 by_lang.setdefault(entry.lang, []).append((form, entry))
         for lang, forms in by_lang.items():
-            # In list order: Whisper only reads the start of a long list.
-            self._hotwords[lang] = ", ".join(dict.fromkeys(form for form, _ in forms))
+            self._hotwords[lang] = _hotword_list(form for form, _ in forms)
             forms.sort(key=lambda f: len(f[0]), reverse=True)  # "Heilig Avondmaal" before "avondmaal"
             alternatives = "|".join(f"(?P<g{i}>{_form_pattern(form)})" for i, (form, _) in enumerate(forms))
             self._patterns[lang] = (re.compile(rf"(?<!\w)(?:{alternatives})(?!\w)"), [e for _, e in forms])
@@ -69,6 +85,20 @@ class Glossary:
     def hotwords(self, lang: str) -> str:
         """The words to prime Whisper with when this language is spoken."""
         return self._hotwords.get(lang, "")
+
+    def only_repeats(self, text: str, lang: str) -> bool:
+        """A line of nothing but glossary words, more than once: Whisper copying its word list.
+
+        Over music it wrote "De Kandelaar, de Kandelaar, ..." without anyone saying it. A single
+        "Amen." is real; "Amen, De Kandelaar, de Kandelaar" isn't something anyone says.
+        """
+        found = self._patterns.get(lang)
+        if found is None:
+            return False
+        pattern, _ = found
+        hits = len(pattern.findall(text))
+        rest = set(re.findall(r"\w+", pattern.sub(" ", text).lower()))
+        return hits >= 2 and rest <= LINK_WORDS
 
     def prepare(self, text: str, source: str, target: str, inline: bool) -> tuple[str, list[str]]:
         """Mark the glossary words in a sentence before it is translated.

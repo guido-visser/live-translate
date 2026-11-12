@@ -68,6 +68,18 @@ SONG_LEVELS = {
 }
 
 
+HOTWORD_MAX_MUSIC = 0.5  # from this music score on, without more speech, Whisper gets no glossary words
+
+
+def is_music(scores: SoundScores) -> bool:
+    """Mostly music and no talking: Whisper would write down its glossary words instead.
+
+    In the service of 8 Nov 2026 every made-up "De Kandelaar, de Kandelaar" came at music 0.5–0.98
+    with speech near 0; real mentions of the name were said with speech above music.
+    """
+    return scores.music >= HOTWORD_MAX_MUSIC and scores.music > scores.speech
+
+
 # A trained model says "song" from this chance on. The church's own training replaces the limits above.
 TRAINED_LIMIT = 0.5
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..config import Settings
 from .clean import clean
-from .glossary import Glossary
+from .glossary import LETTERS, PLACEHOLDER, Glossary
 from .libretranslate import LibreTranslate
 from .nllb import NllbTranslator
 
@@ -64,6 +64,10 @@ class TranslationService:
         prepared, terms = self.glossary.prepare(text, source, target, inline=engine is self.nllb)
         if prepared == text:
             return await engine.translate(text, source, target)
+        if terms and not LETTERS.search(PLACEHOLDER.sub("", prepared)):
+            # Only names ("[1], [2]."): nothing to translate. NLLB drops such placeholders, and
+            # the retry without the glossary turned "De Kandelaar" into "The candlestick".
+            return Glossary.restore(prepared, terms) or text
         result = await engine.translate(prepared, source, target)
         if not terms:
             return result

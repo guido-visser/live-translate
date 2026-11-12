@@ -130,7 +130,8 @@ def test_a_church_with_several_names_keeps_them_all():
     row = GlossaryEntry(lang="nl", term="Kandelaar, De Kandelaar, de Kandelaar", translations={"en": "Kandelaar"})
     assert is_name(row)
     glossary = Glossary([row])
-    assert "De Kandelaar" in glossary.hotwords("nl")  # speech recognition spells it right too
+    # Speech recognition spells it right too. Once: over music Whisper copied "De Kandelaar, de Kandelaar".
+    assert glossary.hotwords("nl") == "Kandelaar"
     for spoken in ("Kandelaar", "De Kandelaar", "de Kandelaar"):
         prepared, terms = glossary.prepare(f"Welkom in {spoken} vandaag", "nl", "en", inline=True)
         assert terms == [spoken] and prepared == "Welkom in [1] vandaag"  # the longest form wins, not "Kandelaar"

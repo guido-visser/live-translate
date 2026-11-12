@@ -7,6 +7,7 @@ from livetranslate.stt.transcriber import (
     StreamingTranscriber,
     Word,
     is_caption,
+    is_loop,
     join_words,
 )
 
@@ -132,6 +133,28 @@ def test_a_phrase_whisper_is_stuck_on_stops_after_twice():
         t.pending = [Word(i, i + 0.5, text)]
         t._emit_sentences()
     assert out == [" Heerlijk.".strip()] * 2 + ["Amen.", "Heerlijk."]
+
+
+def test_a_made_up_sentence_is_dropped_and_kept_out_of_the_prompt():
+    out: list[str] = []
+    t = StreamingTranscriber(
+        lambda a, p: [], lambda a: True, lambda p: None, out.append, AsrSettings(),
+        is_noise=lambda text: "Kandelaar" in text,
+    )  # fmt: skip
+    for i, text in enumerate([" De Kandelaar, de Kandelaar.", " Welkom."]):
+        t.pending = [Word(i, i + 0.5, text)]
+        t._emit_sentences()
+    assert out == ["Welkom."]
+    assert "Kandelaar" not in t.context
+
+
+def test_a_sentence_stuck_in_a_loop_is_noticed():
+    # From the service of 8 Nov 2026, cut off mid-word where Whisper ran out of room.
+    assert is_loop("Kandelaar, " + "de Kandelaar, " * 40 + "de K")
+    assert is_loop("Halleluja, halleluja, halleluja, halleluja, halleluja, halleluja, halleluja, halleluja, "
+                   "halleluja, halleluja, halleluja, halleluja")  # fmt: skip
+    assert not is_loop("Heer, Heer, Heer, wij danken U.")  # short: could be said
+    assert not is_loop("Dus ik kwam daar en daar kun je ontmoedigd raken, denken, oh ja, moeten we hier nou de oorlog mee winnen")
 
 
 def test_local_agreement_commits_common_prefix():

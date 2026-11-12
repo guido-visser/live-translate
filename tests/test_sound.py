@@ -4,7 +4,7 @@ import numpy as np
 
 from livetranslate.calibration import analyse, audio_clip, best_level
 from livetranslate.servicelog import ServiceLog, prune
-from livetranslate.stt.sound import SONG_LEVELS, SingingGate, SoundClassifier, SoundScores
+from livetranslate.stt.sound import SONG_LEVELS, SingingGate, SoundClassifier, SoundScores, is_music
 
 SONG = SoundScores(speech=0.1, singing=0.6, music=0.8)
 PRAYER_OVER_PIANO = SoundScores(speech=0.7, singing=0.1, music=0.6)
@@ -204,3 +204,12 @@ def test_old_logs_are_removed(tmp_path):
     os.utime(old, (1, 1))
     prune(tmp_path)
     assert not old.exists() and new.exists()
+
+
+def test_glossary_words_only_go_to_whisper_when_someone_talks():
+    # Scores from the service of 8 Nov 2026: made-up "De Kandelaar" lines and real mentions.
+    assert is_music(SoundScores(speech=0.0, singing=0.02, music=0.93))
+    assert is_music(SoundScores(speech=0.0, singing=0.01, music=0.5))
+    assert not is_music(SoundScores(speech=0.99, singing=0.0, music=0.0))
+    assert not is_music(SoundScores(speech=0.61, singing=0.0, music=0.21))
+    assert not is_music(SoundScores(speech=0.6, singing=0.0, music=0.55))  # talking over the piano
