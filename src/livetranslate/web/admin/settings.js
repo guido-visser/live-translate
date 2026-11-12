@@ -563,6 +563,7 @@
     $("engine").value = s.translation.engine;
     $("nllbModel").value = s.translation.nllb_model;
     $("nllbDevice").value = s.translation.nllb_device;
+    $("cleanLanguage").checked = s.translation.clean_language;
     $("nllbRows").hidden = s.translation.engine !== "nllb";
     glossary = structuredClone(s.glossary);
     renderGlossary();
@@ -636,6 +637,7 @@
     s.translation.engine = $("engine").value;
     s.translation.nllb_model = $("nllbModel").value;
     s.translation.nllb_device = $("nllbDevice").value;
+    s.translation.clean_language = $("cleanLanguage").checked;
     s.glossary = collectGlossary();
 
     s.vmix.enabled = $("vmixEnabled").checked;

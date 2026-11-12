@@ -108,6 +108,8 @@ Press **Settings** at the top of the main screen. These are the ones you are mos
 
 Choose the main language and the languages listeners can pick. Under **Quick languages** you choose which languages get a button on the main screen.
 
+**No explicit language in translations** (on by default) keeps swear words out. Translation engines sometimes swear where the speaker didn't: "Ik was verdomme gek" came out as "I was fucking crazy". NLLB is kept from writing those words at all; with either engine they are also filtered out afterwards. Words with a normal or Bible meaning, such as *hell* or *damned*, stay. Covered: English, Dutch, German, French, Spanish, Portuguese, Italian, Polish, Russian and Ukrainian.
+
 ### Glossary: words that must come out right
 
 ![The Glossary tab](docs/images/settings-glossary.png)

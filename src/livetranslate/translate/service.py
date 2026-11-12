@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from ..config import Settings
+from .clean import clean
 from .glossary import Glossary
 from .libretranslate import LibreTranslate
 from .nllb import NllbTranslator
@@ -19,6 +20,7 @@ class TranslationService:
         self.nllb = NllbTranslator(settings, data_dir)
         self.engine = settings.translation.engine
         self.glossary = Glossary(settings.glossary)
+        self.clean_language = settings.translation.clean_language
 
     @property
     def active(self) -> LibreTranslate | NllbTranslator:
@@ -52,6 +54,12 @@ class TranslationService:
         return self.active.name_of(code)
 
     async def translate(self, text: str, source: str, target: str) -> str:
+        result = await self._translate(text, source, target)
+        if self.clean_language and source != target:
+            result = clean(result, target)
+        return result
+
+    async def _translate(self, text: str, source: str, target: str) -> str:
         engine = self.active
         prepared, terms = self.glossary.prepare(text, source, target, inline=engine is self.nllb)
         if prepared == text:
@@ -73,6 +81,7 @@ class TranslationService:
 
     async def apply(self, old: Settings, new: Settings) -> None:
         """Bring the engines in line with changed settings."""
+        self.clean_language = new.translation.clean_language
         self.libre.configure(new)
         self.nllb.configure(new)
         if new.translation.engine != self.engine:

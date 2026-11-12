@@ -83,6 +83,8 @@ class TranslationSettings(BaseModel):
     # GPU when there is one: on the CPU each sentence briefly takes several cores, which
     # can make a livestream on the same PC stutter.
     nllb_device: Literal["cpu", "cuda", "auto"] = "auto"
+    # Keep swear words out: the engines sometimes swear where the speaker didn't.
+    clean_language: bool = True
 
 
 class VmixSettings(BaseModel):
