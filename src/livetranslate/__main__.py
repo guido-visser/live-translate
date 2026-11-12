@@ -12,13 +12,15 @@ import threading
 import time
 from logging.handlers import RotatingFileHandler
 
-import httpx
-
 log = logging.getLogger("livetranslate")
 
 # A phone's audio stream never ends by itself; without a limit it would keep the app from
 # closing (and an update's installer waiting) until that phone leaves.
 SHUTDOWN_WAIT_S = 3
+# How often the app may start itself again in a row before it leaves that to a person.
+MAX_RESTARTS = 3
+# How long a restarted app waits for the old one to close.
+AFTER_WAIT_S = 120
 
 # Kept for the life of the process.
 _instance_mutex = None
@@ -27,6 +29,8 @@ _crash_log = None
 
 def already_running(port: int) -> bool:
     """Is Live Translate already serving on this port? (Then we just open its page.)"""
+    import httpx
+
     try:
         r = httpx.get(f"http://127.0.0.1:{port}/api/public", timeout=1.5)
         return r.status_code == 200 and "url" in r.json()
@@ -67,6 +71,52 @@ def single_instance(port: int) -> bool:
     global _instance_mutex
     _instance_mutex = handle  # held until the process ends
     return True
+
+
+def instance_starting(port: int) -> bool:
+    """Does another process hold this port's claim (see single_instance)?"""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenMutexW.restype = ctypes.c_void_p
+    handle = kernel32.OpenMutexW(0x00100000, False, f"Local\\LiveTranslate-{port}")  # SYNCHRONIZE
+    if not handle:
+        return False
+    kernel32.CloseHandle(ctypes.c_void_p(handle))
+    return True
+
+
+def wait_for_exit(pid: int, timeout_s: float) -> None:
+    """A restart: the old process has to let go of the port first."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    if handle:
+        kernel32.WaitForSingleObject(ctypes.c_void_p(handle), int(timeout_s * 1000))
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+
+
+def restart_command(argv: list[str], pid: int, resume: bool) -> list[str]:
+    """This app again, started as it was, after this process (pid) has ended."""
+    args, restarts, i = [], 0, 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--after", "--restarts") and i + 1 < len(argv):
+            if arg == "--restarts":
+                restarts = int(argv[i + 1])
+            i += 2
+            continue
+        if arg != "--resume":
+            args.append(arg)
+        i += 1
+    command = [sys.executable, "-m", "livetranslate", *args, "--after", str(pid), "--restarts", str(restarts + 1)]
+    return [*command, "--resume"] if resume else command
 
 
 def lower_priority() -> None:
@@ -126,7 +176,18 @@ def main() -> None:
     parser.add_argument("--autostart", action="store_true", help="started with Windows: show what the settings say")
     parser.add_argument("--no-tray", action="store_true", help="no system tray icon (e.g. on a server)")
     parser.add_argument("--debug", action="store_true")
+    # When the app starts itself again (see health.py):
+    parser.add_argument("--after", type=int, help=argparse.SUPPRESS)  # wait for this process to end
+    parser.add_argument("--restarts", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--resume", action="store_true", help=argparse.SUPPRESS)  # it was translating
     args = parser.parse_args()
+
+    from . import splash
+
+    # Something on screen right away when someone started it, before the slow part.
+    starting = None
+    if not args.no_browser and not args.autostart:
+        starting = splash.show(os.getpid())
 
     data = data_dir()
     handlers: list[logging.Handler] = [
@@ -141,6 +202,9 @@ def main() -> None:
     )
 
     enable_crash_log(data / "crash.log")
+    if args.after:
+        log.info("Started again by the app (%d); waiting for process %d to close", args.restarts, args.after)
+        wait_for_exit(args.after, AFTER_WAIT_S)
 
     store = SettingsStore()
     if args.port:
@@ -151,23 +215,26 @@ def main() -> None:
 
     start_window = store.settings.start_window if args.autostart else "normal"
     show_page = not args.no_browser and start_window != "tray"
+    if starting is None and show_page:
+        starting = splash.show(os.getpid())
 
     def open_admin(url: str = admin_url, minimized: bool = False) -> None:
         open_page(url, store.settings.app_window, minimized=minimized)
 
     if already_running(port):
         log.info("Live Translate is already running; opening its page")
+        splash.close(starting)
         if show_page:
             open_admin()
         return
     if not single_instance(port):
+        # However long it takes; the splash of the one that's starting (or this one's) stays up.
         log.info("Live Translate is already starting; opening its page when it is ready")
-        for _ in range(150):
-            if already_running(port):
-                if show_page:
-                    open_admin()
-                break
-            time.sleep(0.2)
+        while instance_starting(port) and not already_running(port):
+            time.sleep(1)
+        splash.close(starting)
+        if show_page and already_running(port):
+            open_admin()
         return
 
     lower_priority()
@@ -180,7 +247,7 @@ def main() -> None:
 
     from .server.app import create_app
 
-    app = create_app(store, data)
+    app = create_app(store, data, resume=args.resume)
     server = make_server(app, port)
     log.info("Live Translate is starting. Operator page: %s", admin_url)
 
@@ -198,16 +265,6 @@ def main() -> None:
         log.warning("Tunnel port %d is in use (%s); listeners over the internet won't work", tunnel_port, exc)
         app.state.services.tunnel.local_port = 0
 
-    def open_browser_when_ready() -> None:
-        for _ in range(100):
-            if server.started:
-                open_admin(minimized=start_window == "minimized")
-                return
-            time.sleep(0.2)
-
-    if show_page:
-        threading.Thread(target=open_browser_when_ready, daemon=True).start()
-
     tray = None if args.no_tray else _make_tray(app, server, port, open_admin)
 
     def request_exit() -> None:
@@ -215,6 +272,38 @@ def main() -> None:
         server.should_exit = True
         if tray is not None:
             tray.stop()
+
+    def on_ready() -> None:
+        splash.close(starting)
+        if show_page:
+            open_admin(minimized=start_window == "minimized")
+
+    def on_broken(problem: str) -> None:
+        splash.close(starting)
+        if args.restarts >= MAX_RESTARTS:
+            log.error("Started again %d times already; not again. Close Live Translate and start it.", args.restarts)
+            return
+        import subprocess
+
+        resume = app.state.services.pipeline.state != "stopped"
+        log.error("Starting Live Translate again to fix this%s", " (translation goes on)" if resume else "")
+        try:
+            subprocess.Popen(restart_command(sys.argv[1:], os.getpid(), resume))
+        except OSError:
+            log.exception("Could not start Live Translate again")
+            return
+        request_exit()
+
+    from .health import Watchdog, check
+
+    Watchdog(
+        is_started=lambda: server.started,
+        is_stopping=lambda: server.should_exit,
+        on_ready=on_ready,
+        on_broken=on_broken,
+        check=lambda: check(port),
+        report=lambda problem: setattr(app.state, "pages_problem", problem),
+    ).start()
 
     app.state.services.updater.request_exit = request_exit
     if tray is None:
@@ -243,6 +332,8 @@ def _make_tray(app, server, port: int, open_admin):
     services = app.state.services
 
     def get_status() -> tuple[str, int]:
+        if getattr(app.state, "pages_problem", None):
+            return "problem", 0  # red, see health.py
         state = tray_state(services.pipeline.status(), services.settings.source_language)
         listeners = sum(services.hub.counts().values())
         audio_only = sum(services.speech.listener_counts().values())

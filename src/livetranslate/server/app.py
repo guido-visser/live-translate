@@ -8,12 +8,13 @@ import json
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import anyio
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 from .. import __version__, autostart, calibration
 from ..audio.devices import list_all
@@ -31,6 +32,7 @@ from ..translate.service import TranslationService
 from ..tts.piper import VOICES, SpeechService
 from ..tunnel import Tunnel
 from ..updater import Updater, install_dir, start_data_move
+from .files import WebFiles
 from .hub import Connection, Hub
 from .network import GpuStats, lan_addresses, listener_url, qr_svg
 
@@ -53,14 +55,28 @@ def _is_local_name(address: str) -> bool:
         return False
 
 
-class FreshStaticFiles(StaticFiles):
-    """Static files the browser checks before reuse, so an update never mixes new pages
-    with old scripts (unchanged files still come from the cache, via their ETag)."""
+class LogFailedRequests:
+    """Uvicorn logs the traceback of a failed request but not which address it was for."""
 
-    def file_response(self, *args, **kwargs):
-        response = super().file_response(*args, **kwargs)
-        response.headers["Cache-Control"] = "no-cache"
-        return response
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        except Exception:
+            if scope["type"] in ("http", "websocket"):
+                log.error("Request failed: %s %s", scope.get("method", "WEBSOCKET"), scope.get("path"))
+            raise
+
+
+def _quiet_disconnects(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+    """A phone that leaves mid-stream makes Windows' asyncio log a ConnectionResetError traceback
+    (in _ProactorBasePipeTransport._call_connection_lost). That is normal; everything else still counts."""
+    if isinstance(context.get("exception"), (ConnectionResetError, ConnectionAbortedError)):
+        log.debug("A connection closed: %s", context.get("message"))
+        return
+    loop.default_exception_handler(context)
 
 
 class TunnelGuard:
@@ -149,12 +165,22 @@ class Services:
         }
 
 
-def create_app(store: SettingsStore | None = None, data: Path | None = None, manage_translator: bool = True) -> FastAPI:
+def create_app(
+    store: SettingsStore | None = None,
+    data: Path | None = None,
+    manage_translator: bool = True,
+    resume: bool = False,
+) -> FastAPI:
+    """resume: start translating as soon as possible, also without auto_start_translation (the
+    app restarted itself while it was translating)."""
     store = store or SettingsStore()
     services = Services(store, data or default_data_dir())
+    web = WebFiles(WEB)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
+        if sys.platform == "win32":
+            asyncio.get_running_loop().set_exception_handler(_quiet_disconnects)
         services.pipeline.ensure_worker()
         tasks = [asyncio.create_task(_admin_ticker(services))]
         if manage_translator:
@@ -162,7 +188,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             tasks.append(asyncio.create_task(services.updater.run_checks(lambda: services.settings.check_updates)))
             if services.settings.setup_done:  # otherwise the wizard starts these when it has the choices
                 tasks.append(asyncio.create_task(_start_translator(services)))
-                if services.settings.auto_start_translation:
+                if services.settings.auto_start_translation or resume:
                     tasks.append(asyncio.create_task(_auto_start(services)))
             await services.tunnel.apply(services.settings.remote)
         yield
@@ -177,7 +203,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     app = FastAPI(title="Live Translate", lifespan=lifespan)
     app.state.services = services
     app.add_middleware(TunnelGuard, tunnel=services.tunnel)
-    app.mount("/static", FreshStaticFiles(directory=WEB), name="static")
+    app.add_middleware(LogFailedRequests)
 
     def require_admin(request: Request | WebSocket) -> None:
         host = request.client.host if request.client else ""
@@ -195,12 +221,12 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
     # -- pages -----------------------------------------------------------------
 
     @app.get("/", include_in_schema=False)
-    async def listener_page():
-        return FileResponse(WEB / "client" / "index.html", headers={"Cache-Control": "no-cache"})
+    async def listener_page(request: Request):
+        return web.response("client/index.html", request)
 
     @app.get("/manifest.webmanifest", include_in_schema=False)
-    async def manifest():
-        return FileResponse(WEB / "client" / "manifest.webmanifest", media_type="application/manifest+json")
+    async def manifest(request: Request):
+        return web.response("client/manifest.webmanifest", request)
 
     @app.get("/admin", include_in_schema=False)
     async def admin_page(request: Request):
@@ -211,7 +237,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         if not services.settings.setup_done:
             query = request.url.query
             return RedirectResponse(f"/admin/setup?{query}" if query else "/admin/setup", status_code=307)
-        return FileResponse(WEB / "admin" / "index.html", headers={"Cache-Control": "no-cache"})
+        return web.response("admin/index.html", request)
 
     @app.get("/admin/setup", include_in_schema=False)
     async def setup_page(request: Request):
@@ -219,7 +245,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             require_admin(request)
         except HTTPException as exc:
             return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
-        return FileResponse(WEB / "admin" / "setup.html", headers={"Cache-Control": "no-cache"})
+        return web.response("admin/setup.html", request)
 
     @app.get("/admin/settings", include_in_schema=False)
     async def settings_page(request: Request):
@@ -227,7 +253,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
             require_admin(request)
         except HTTPException as exc:
             return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
-        return FileResponse(WEB / "admin" / "settings.html", headers={"Cache-Control": "no-cache"})
+        return web.response("admin/settings.html", request)
 
     @app.get("/admin/defaults.js", include_in_schema=False)
     async def admin_defaults():
@@ -239,8 +265,19 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         )
 
     @app.get("/qr", include_in_schema=False)
-    async def qr_page():
-        return FileResponse(WEB / "admin" / "qr.html", headers={"Cache-Control": "no-cache"})
+    async def qr_page(request: Request):
+        return web.response("admin/qr.html", request)
+
+    @app.api_route("/static/{name:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def static_file(name: str, request: Request):
+        return web.response(name, request)
+
+    @app.get("/api/health", include_in_schema=False)
+    async def health():
+        """For the app's own check (see health.py): a page and both kinds of worker-thread hop."""
+        await anyio.to_thread.run_sync(int)  # what FileResponse and plain def endpoints use
+        await asyncio.to_thread(int)
+        return {"ok": web.get("admin/qr.html") is not None}
 
     # -- public API ------------------------------------------------------------
 

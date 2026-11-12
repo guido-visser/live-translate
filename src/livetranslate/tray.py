@@ -19,6 +19,7 @@ COLORS = {
     "running": (31, 157, 85),
     "paused": (217, 138, 0),
     "testimony": (217, 138, 0),
+    "problem": (204, 41, 41),
 }
 
 TEXTS = {
@@ -32,6 +33,7 @@ TEXTS = {
         "paused": "Gepauzeerd",
         "testimony": "Getuigenis",
         "listeners": "luisteraars",
+        "problem": "Pagina's werken niet; zie het logboek",
     },
     "en": {
         "open": "Open operator page",
@@ -43,6 +45,7 @@ TEXTS = {
         "paused": "Paused",
         "testimony": "Testimony",
         "listeners": "listeners",
+        "problem": "Pages don't work; see the log",
     },
     "ru": {
         "open": "Открыть панель управления",
@@ -54,6 +57,7 @@ TEXTS = {
         "paused": "Пауза",
         "testimony": "Свидетельство",
         "listeners": "слушателей",
+        "problem": "Страницы не работают; см. журнал",
     },
     "uk": {
         "open": "Відкрити панель керування",
@@ -65,6 +69,7 @@ TEXTS = {
         "paused": "Пауза",
         "testimony": "Свідчення",
         "listeners": "слухачів",
+        "problem": "Сторінки не працюють; див. журнал",
     },
 }
 
