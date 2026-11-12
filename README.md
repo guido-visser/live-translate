@@ -201,6 +201,8 @@ To remove that as well, tick **Also remove all data** when the uninstaller asks.
 | A name or word comes out wrong | Add it under **Settings → Glossary**. |
 | Translation lags behind | Open **Performance** at the top. A slower PC may need a smaller model. |
 | The text on a phone stops when the screen locks | Reading needs the screen on. **Listen** does keep playing. |
+| Starting takes minutes, with "Live Translate is starting" on screen | Windows is probably busy updating, often right after the PC wakes up. Wait for it; clicking again doesn't help. Set Windows Update's **active hours** to cover your services, and start the app well before one. |
+| The tray icon turns red | The pages stopped working. Live Translate starts itself again to fix it, and carries on translating. If it stays red, close it from the tray and start it again. |
 | The setup says the data folder can't be reached | Connect the drive it's on, and start Live Translate again. |
 | Still stuck | [Report it on GitHub](../../issues), and include `livetranslate.log` from the data folder. It's shown under **Settings → About**. |
 
