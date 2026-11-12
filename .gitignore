@@ -7,3 +7,4 @@ build/
 *.egg-info/
 packaging/windows/Output/
 packaging/windows/bin/
+Microsoft/

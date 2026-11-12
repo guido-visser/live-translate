@@ -168,6 +168,7 @@ class NllbTranslator:
                 str(folder), device=device, compute_type=compute_type, inter_threads=2, intra_threads=4
             )
             self._tokenizer = Tokenizer.from_file(str(folder / "tokenizer.json"))
+            self._blocked = {}
         self._loaded = (self.model, self.device)
         self.needs_restart = False
         log.info("NLLB %s ready on %s", self.model, device)

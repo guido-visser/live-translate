@@ -185,6 +185,9 @@
       for (const key of state.profile_fields) {
         if (key in profile) s[key] = profile[key];
       }
+      if (profile.song_model) {
+        await api("/api/admin/training/model", { method: "POST", body: JSON.stringify({ model: profile.song_model }) });
+      }
       followInterface = false;
       fillInputs();
       $("wizProfileStatus").textContent = `✓ ${t("wizProfileLoaded")}`;

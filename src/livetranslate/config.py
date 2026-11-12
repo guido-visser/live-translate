@@ -170,6 +170,15 @@ def default_glossary() -> list[GlossaryEntry]:
     return [GlossaryEntry(term=term, translations={"en": en}) for term, en in rows]
 
 
+class SongModel(BaseModel):
+    """What Settings → Training learned from this church's services; see training.py."""
+
+    weights: list[float] = Field(min_length=1024, max_length=1024)
+    bias: float
+    services: int = 0  # how many services it learned from
+    trained_at: str = ""
+
+
 # What makes this church's setup its own; exported and imported as one file (Settings → Church).
 PROFILE_FIELDS = (
     "church_name",
@@ -179,6 +188,7 @@ PROFILE_FIELDS = (
     "quick_languages",
     "tts_enabled",
     "glossary",
+    "song_model",
 )
 
 
@@ -217,6 +227,8 @@ class Settings(BaseModel):
     # Don't translate songs: speech is still translated, also with instruments playing.
     skip_singing: bool = True
     song_level: int = Field(default=0, ge=-3, le=3)  # stt.sound.SONG_LEVELS, set in Settings → Church
+    # Trained on this church's services in Settings → Training; takes over from the level above.
+    song_model: SongModel | None = None
     # Run the sound classifier and the voices on the GPU (DirectML) when possible.
     gpu_helpers: bool = True
     service_log: ServiceLogSettings = Field(default_factory=ServiceLogSettings)

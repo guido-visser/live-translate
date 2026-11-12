@@ -190,17 +190,27 @@ def _restore_to_maximized(title: str) -> None:
         ctypes.windll.user32.SetWindowPlacement(hwnd, ctypes.byref(placement))
 
 
+RECORDINGS = (
+    "Audio and video (*.mp4;*.mkv;*.webm;*.mov;*.avi;*.ts;*.mp3;*.m4a;*.aac;*.wav;*.flac;*.ogg;*.opus)",
+    "All files (*.*)",
+)
+
+
 class _WindowApi:
     """What the question on the page can ask of this window; see LT.askClose in common.js."""
 
-    def __init__(self, show, close):
-        self._show, self._close = show, close
+    def __init__(self, show, close, pick):
+        self._show, self._close, self._pick = show, close, pick
 
     def show_window(self) -> None:
         self._show()
 
     def close_window(self) -> None:
         self._close()
+
+    def pick_files(self) -> list[str]:
+        """Settings → Training: a page in a browser never gets to know where a file is."""
+        return self._pick()
 
 
 def _ask_before_closing(window, close) -> None:
@@ -260,6 +270,10 @@ def main() -> int:
         closing_now.set()
         window.destroy()
 
+    def pick_files() -> list[str]:
+        chosen = window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True, file_types=RECORDINGS)
+        return list(chosen or [])
+
     window = webview.create_window(
         title,
         url,
@@ -271,7 +285,7 @@ def main() -> int:
         text_select=True,
         minimized=minimized,
         maximized=state["maximized"] and not minimized,  # pywebview would ignore minimized
-        js_api=_WindowApi(lambda: _bring_to_front(title), close_now),
+        js_api=_WindowApi(lambda: _bring_to_front(title), close_now, pick_files),
     )
 
     def on_shown() -> None:

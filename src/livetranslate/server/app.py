@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__, autostart, calibration
 from ..audio.devices import list_all
-from ..config import PROFILE_FIELDS, Settings, SettingsStore, data_dir as default_data_dir
+from ..config import PROFILE_FIELDS, Settings, SettingsStore, SongModel, data_dir as default_data_dir
 from ..firstrun import Preparation
 from ..integrations.obs import ObsOutput
 from ..integrations.vmix import VmixOutput
@@ -25,6 +25,7 @@ from ..languages import RTL, native_name, ui_language
 from ..native import onnxruntime_error
 from ..pipeline import WHISPER_LANGUAGES, Pipeline
 from ..stt.sound import SONG_LEVELS
+from ..training import Trainer, is_youtube, list_youtube
 from ..translate.glossary import Glossary
 from ..translate.service import TranslationService
 from ..tts.piper import VOICES, SpeechService
@@ -102,10 +103,20 @@ class Services:
         self.updater = Updater(data, lambda: self.pipeline.state == "stopped")
         self.tunnel = Tunnel(data, store.settings.remote.local_port)
         self.preparation = Preparation(self)
+        self.trainer = Trainer(
+            data,
+            lambda: store.settings,
+            lambda: self.pipeline.state == "stopped",
+            self.use_song_model,
+            lambda: store.settings.gpu_helpers,
+        )
 
     @property
     def settings(self) -> Settings:
         return self.store.settings
+
+    def use_song_model(self, model: SongModel | None) -> None:
+        self.store.save(self.settings.model_copy(update={"song_model": model}))
 
     def listener_url(self) -> str:
         """The address in the QR code: the public one when listeners come over the internet."""
@@ -374,6 +385,7 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         new.remote.local_port = old.remote.local_port  # bound at start
         # These have their own switch and slider; a page's older copy must not undo them.
         new.skip_singing, new.song_level = old.skip_singing, old.song_level
+        new.song_model = old.song_model  # so does training, and a page mustn't undo that either
         services.store.save(new)
         if new.start_with_windows != old.start_with_windows:
             autostart.apply(new.start_with_windows)
@@ -492,6 +504,65 @@ def create_app(store: SettingsStore | None = None, data: Path | None = None, man
         if not (folder / "audio.flac").is_file():
             raise HTTPException(404, "This service has no recording")
         return Response(await asyncio.to_thread(calibration.audio_clip, folder, t), media_type="audio/wav")
+
+    @app.get("/api/admin/training")
+    async def training_status(request: Request):
+        require_admin(request)
+        return services.trainer.status()
+
+    @app.post("/api/admin/training/add")
+    async def training_add(request: Request):
+        """Lines with YouTube links or file paths. Channels and playlists come back, to choose from."""
+        require_admin(request)
+        return services.trainer.add(str((await request.json()).get("text", "")))
+
+    @app.post("/api/admin/training/list")
+    async def training_list(request: Request):
+        """What is in a channel or playlist; nothing is downloaded yet."""
+        require_admin(request)
+        url = str((await request.json()).get("url", ""))
+        if not is_youtube(url):
+            raise HTTPException(400, "Not a YouTube link")
+        try:
+            return {"videos": await asyncio.to_thread(list_youtube, url)}
+        except Exception as exc:
+            log.warning("Couldn't list %s: %s", url, exc)
+            raise HTTPException(502, "Couldn't read this link") from exc
+
+    @app.post("/api/admin/training/add-listed")
+    async def training_add_listed(request: Request):
+        require_admin(request)
+        return {"added": services.trainer.add_listed(list((await request.json()).get("videos", [])))}
+
+    @app.delete("/api/admin/training/sources/{source_id}")
+    async def training_remove(source_id: str, request: Request):
+        require_admin(request)
+        services.trainer.remove(source_id)
+        return services.trainer.status()
+
+    @app.post("/api/admin/training/start")
+    async def training_start(request: Request):
+        require_admin(request)
+        if not services.trainer.start():
+            raise HTTPException(409, "Training can't start now")
+        return services.trainer.status()
+
+    @app.post("/api/admin/training/stop")
+    async def training_stop(request: Request):
+        require_admin(request)
+        services.trainer.stop()
+        return services.trainer.status()
+
+    @app.post("/api/admin/training/model")
+    async def training_model(request: Request):
+        """Go back to the standard detection (null), or take a model from a church profile."""
+        require_admin(request)
+        body = (await request.json()).get("model")
+        try:
+            services.use_song_model(None if body is None else SongModel.model_validate(body))
+        except ValueError as exc:
+            raise HTTPException(400, "Not a trained model") from exc
+        return admin_state()
 
     @app.post("/api/admin/setup/prepare")
     async def prepare(request: Request):

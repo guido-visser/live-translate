@@ -702,8 +702,15 @@
     try {
       const profile = JSON.parse(await file.text());
       if (!Array.isArray(profile.glossary)) throw new Error("no glossary");
+      const model = state.settings.song_model; // has its own way in, below
       for (const key of state.profile_fields) {
         if (key in profile) state.settings[key] = profile[key];
+      }
+      state.settings.song_model = model;
+      if (profile.song_model) {
+        const next = await api("/api/admin/training/model", { method: "POST", body: JSON.stringify({ model: profile.song_model }) });
+        state.settings.song_model = next.settings.song_model;
+        renderTrainedModel();
       }
       fill();
       markDirty();
@@ -835,6 +842,19 @@
     await chooseService(found[0].name);
   }
 
+  // With a trained model the slider has nothing to do: the model decides.
+  function renderCalibrationPanel() {
+    const trained = Boolean(state.settings.song_model);
+    $("calTrained").hidden = !trained;
+    if (trained) {
+      $("calBody").hidden = $("calEmpty").hidden = true;
+    } else if (!calService) {
+      if ($("calibration").open) loadServices();
+    } else {
+      $("calBody").hidden = false;
+    }
+  }
+
   async function labelPicked(kind) {
     calLabels = calLabels.filter((l) => l.end <= calPick.start || l.start >= calPick.end);
     calLabels.push({ start: calPick.start, end: calPick.end, kind });
@@ -853,7 +873,7 @@
     $("calStatus").textContent = t("calApplied");
   }
 
-  $("calibration").addEventListener("toggle", (e) => { if (e.target.open && !calService) loadServices(); });
+  $("calibration").addEventListener("toggle", (e) => { if (e.target.open) renderCalibrationPanel(); });
   $("calService").addEventListener("change", (e) => chooseService(e.target.value));
   $("calLevel").addEventListener("input", () => { $("calFit").hidden = true; renderCalibration(); });
   $("calIsMusic").addEventListener("click", () => labelPicked("music"));
@@ -871,6 +891,230 @@
     player.hidden = false;
     player.play();
   });
+
+  // -- training the song detection on this church's services ---------------------------------
+
+  let training = null;
+  let picked = []; // what a channel or playlist holds, to choose from
+  const channelsToList = [];
+
+  const panelOpen = () => !document.querySelector("[data-panel=training]").hidden;
+  const percent = (value) => `${value.toLocaleString(window.LT.lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+
+  function renderTrainedModel() {
+    const model = state.settings.song_model;
+    $("trainInUse").textContent = model
+      ? t("trainUsingModel").replace("{n}", model.services).replace("{date}", model.trained_at)
+      : t("trainUsingStandard");
+    $("trainStandard").hidden = !model;
+    renderCalibrationPanel();
+  }
+
+  function sourceLine(source) {
+    if (source.state === "busy") {
+      const step = training.step === "downloading" ? "trainDownloading" : "trainReading";
+      return t(step).replace("{p}", Math.round(training.share * 100));
+    }
+    if (source.state === "done") {
+      return t("trainDone").replace("{song}", Math.round(source.song_s / 60)).replace("{speech}", Math.round(source.speech_s / 60));
+    }
+    if (source.state === "skipped") return t("trainUnclear");
+    if (source.state === "error") return t("trainFailed").replace("{detail}", source.detail);
+    return t("trainWaiting");
+  }
+
+  function renderSources() {
+    const list = $("trainSources");
+    const sources = training.sources;
+    while (list.children.length > sources.length) list.lastChild.remove();
+    sources.forEach((source, i) => {
+      let row = list.children[i];
+      if (!row) {
+        row = document.createElement("li");
+        row.innerHTML = '<span class="train-source-text"><span class="train-source-title"></span><span class="small train-source-state"></span></span><button type="button" class="icon-btn">✕</button>';
+        row.querySelector("button").addEventListener("click", async () => {
+          training = await api(`/api/admin/training/sources/${encodeURIComponent(row.dataset.id)}`, { method: "DELETE" });
+          renderTraining();
+        });
+        list.appendChild(row);
+      }
+      row.dataset.id = source.id;
+      const title = row.querySelector(".train-source-title");
+      title.textContent = source.title;
+      title.title = source.source;
+      const line = row.querySelector(".train-source-state");
+      line.textContent = sourceLine(source);
+      line.className = `small train-source-state ${source.state === "error" || source.state === "skipped" ? "warn-text" : "muted"}`;
+      const remove = row.querySelector("button");
+      remove.setAttribute("aria-label", `${t("trainRemove")}: ${source.title}`);
+      remove.title = t("trainRemove");
+      remove.hidden = source.id === training.current;
+    });
+    $("trainEmpty").hidden = sources.length > 0;
+  }
+
+  function renderResult() {
+    const result = training.result;
+    $("trainResult").hidden = !result;
+    if (!result) return;
+    $("trainResultText").textContent = result.used
+      ? t("trainResultUsed").replace("{n}", result.services)
+      : t("trainResultNot").replace("{why}", t(`trainWhy_${result.problem}`));
+    for (const [row, key] of [["Song", "song"], ["Speech", "speech"], ["Mixed", "mixed"]]) {
+      $(`train${row}Rules`).textContent = percent(result.rules[key]);
+      $(`train${row}Trained`).textContent = percent(result.trained[key]);
+    }
+  }
+
+  function renderTraining() {
+    if (!training) return;
+    const busy = training.state !== "idle";
+    const toRead = training.sources.some((s) => s.state === "waiting" || s.state === "error");
+    const enough = training.usable >= training.needed;
+    $("trainStart").disabled = !training.may_run || !(toRead || enough);
+    $("trainStart").hidden = busy;
+    $("trainStop").hidden = !busy;
+    $("trainFiles").hidden = !window.pywebview?.api?.pick_files;
+    renderSources();
+    renderResult();
+
+    let text = "";
+    if (training.state === "learning") text = t("trainLearning");
+    else if (busy) text = t("trainWorking");
+    else if (!training.may_run) text = t("trainBlocked");
+    else if (training.stopped_for_service) text = t("trainStoppedForService");
+    else if (training.error) text = t("trainFailed").replace("{detail}", training.error);
+    else if (training.sources.length && !toRead && !enough) text = t("trainNeedMore");
+    const message = $("trainMessage");
+    message.textContent = text;
+    message.className = `small${!busy && (training.error || !training.may_run) ? " warn-text" : ""}`;
+
+    $("trainProgress").hidden = !busy;
+    if (busy) {
+      const fill = $("trainProgressFill");
+      fill.className = training.current ? "" : "unknown";
+      fill.style.width = training.current ? `${training.share * 100}%` : "";
+    }
+  }
+
+  async function refreshTraining() {
+    const wasBusy = training && training.state !== "idle";
+    try {
+      training = await api("/api/admin/training");
+      if (wasBusy && training.state === "idle") { // a new model may be in use now
+        const fresh = await api("/api/admin/state");
+        state.settings.song_model = fresh.settings.song_model;
+        renderTrainedModel();
+      }
+    } catch {
+      return; // the next tick tries again
+    }
+    renderTraining();
+  }
+
+  function setAddStatus(text, warn = false) {
+    const status = $("trainAddStatus");
+    status.textContent = text;
+    status.className = `small${warn ? " warn-text" : ""}`;
+  }
+
+  async function listNextChannel() {
+    $("trainPicker").hidden = true;
+    const url = channelsToList.shift();
+    if (!url) return;
+    const earlier = $("trainAddStatus").textContent; // what was added, or wasn't recognised
+    const warned = $("trainAddStatus").classList.contains("warn-text");
+    setAddStatus(t("trainLooking"));
+    try {
+      const { videos } = await api("/api/admin/training/list", { method: "POST", body: JSON.stringify({ url }) });
+      const known = new Set(training.sources.map((s) => s.source));
+      picked = videos.filter((v) => !known.has(v.source));
+      setAddStatus(earlier, warned);
+      showPicker();
+    } catch {
+      setAddStatus(t("trainListFailed").replace("{url}", url), true);
+      await listNextChannel();
+    }
+  }
+
+  function showPicker() {
+    const list = $("trainPickList");
+    list.textContent = "";
+    for (const video of picked) {
+      const label = document.createElement("label");
+      label.className = "check";
+      video.box = document.createElement("input");
+      video.box.type = "checkbox";
+      video.box.checked = video.suggested;
+      video.box.addEventListener("change", renderPickCount);
+      const text = document.createElement("span");
+      text.textContent = `${video.title}${video.duration ? ` · ${Math.round(video.duration / 60)} min` : ""}`;
+      label.append(video.box, " ", text);
+      list.appendChild(label);
+    }
+    $("trainPickTitle").textContent = t("trainPickTitle").replace("{n}", picked.length);
+    $("trainPicker").hidden = false;
+    renderPickCount();
+  }
+
+  function renderPickCount() {
+    const count = picked.filter((v) => v.box.checked).length;
+    $("trainPickAdd").textContent = t("trainAddPicked").replace("{n}", count);
+    $("trainPickAdd").disabled = !count;
+  }
+
+  async function addTraining(text) {
+    const answer = await api("/api/admin/training/add", { method: "POST", body: JSON.stringify({ text }) });
+    const parts = [];
+    if (answer.added) parts.push(t("trainAdded").replace("{n}", answer.added));
+    if (answer.rejected.length) parts.push(t("trainRejected").replace("{lines}", answer.rejected.join(", ")));
+    setAddStatus(parts.join(" "), answer.rejected.length > 0);
+    $("trainLinks").value = answer.rejected.join("\n");
+    await refreshTraining();
+    const idle = $("trainPicker").hidden && !channelsToList.length;
+    channelsToList.push(...answer.channels);
+    if (idle && answer.channels.length) await listNextChannel();
+  }
+
+  $("trainAdd").addEventListener("click", () => {
+    const text = $("trainLinks").value.trim();
+    if (text) addTraining(text);
+  });
+  $("trainFiles").addEventListener("click", async () => {
+    const files = await window.pywebview.api.pick_files();
+    if (files?.length) addTraining(files.join("\n"));
+  });
+  function tickAll(on) {
+    for (const video of picked) video.box.checked = on;
+    renderPickCount();
+  }
+  $("trainPickAll").addEventListener("click", () => tickAll(true));
+  $("trainPickNone").addEventListener("click", () => tickAll(false));
+  $("trainPickAdd").addEventListener("click", async () => {
+    const videos = picked.filter((v) => v.box.checked).map(({ source, title }) => ({ source, title }));
+    const { added } = await api("/api/admin/training/add-listed", { method: "POST", body: JSON.stringify({ videos }) });
+    setAddStatus(t("trainAdded").replace("{n}", added));
+    await refreshTraining();
+    await listNextChannel();
+  });
+  $("trainPickCancel").addEventListener("click", listNextChannel);
+  $("trainStart").addEventListener("click", async () => {
+    try {
+      training = await api("/api/admin/training/start", { method: "POST" });
+    } catch { /* translating started just now: the next tick says so */ }
+    renderTraining();
+  });
+  $("trainStop").addEventListener("click", async () => {
+    await api("/api/admin/training/stop", { method: "POST" });
+    await refreshTraining();
+  });
+  $("trainStandard").addEventListener("click", async () => {
+    if (!confirm(t("trainStandardConfirm"))) return;
+    const next = await api("/api/admin/training/model", { method: "POST", body: JSON.stringify({ model: null }) });
+    state.settings.song_model = next.settings.song_model;
+    renderTrainedModel();
+  });
+  setInterval(() => { if (state && (panelOpen() || (training && training.state !== "idle"))) refreshTraining(); }, 1000);
 
   // -- updates (installing happens on the main screen) -------------------------------------
 
@@ -1006,7 +1250,7 @@
   window.LT.beforeClosing = saveFirst;
 
   // The test sentence, the search fields and file pickers are not settings, and calibrating saves its own.
-  const isSetting = (e) => e.target.id !== "glossarySample" && !["search", "file"].includes(e.target.type) && !e.target.closest("#calibration");
+  const isSetting = (e) => e.target.id !== "glossarySample" && !["search", "file"].includes(e.target.type) && !e.target.closest("#calibration, [data-panel=training]");
   const isTyped = (el) => el.matches?.("input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file])");
   form.addEventListener("input", (e) => {
     if (!isSetting(e) || !isTyped(e.target)) return;
@@ -1067,6 +1311,8 @@
     renderGlossary();
     renderUpdate();
     renderCalibration();
+    renderTrainedModel();
+    renderTraining();
   });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));
@@ -1074,6 +1320,8 @@
     state = s;
     devices = d;
     fill();
+    renderTrainedModel();
+    refreshTraining();
     if (state.settings.vmix.enabled || state.settings.vmix.input) refreshVmix();
     if (state.settings.obs.enabled || state.settings.obs.source) refreshObs();
     if (location.hash === "#about") showTab("about");  // now that it knows the version
