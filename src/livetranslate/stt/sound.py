@@ -68,16 +68,30 @@ SONG_LEVELS = {
 }
 
 
+# A trained model says "song" from this chance on. The church's own training replaces the limits above.
+TRAINED_LIMIT = 0.5
+
+
+def song_chance(weights: np.ndarray, bias: float, description: np.ndarray) -> float:
+    """How sure a trained model is that this is a song, from YAMNet's description of the sound."""
+    return float(1 / (1 + np.exp(-np.clip(np.dot(description, weights) + bias, -30, 30))))
+
+
 class SoundClassifier:
     def __init__(self, gpu: bool = True):
         self.session = onnx_session(MODEL, gpu)
 
-    def scores(self, audio: np.ndarray) -> SoundScores:
+    def analyse(self, audio: np.ndarray) -> tuple[SoundScores, np.ndarray]:
+        """The scores, and the 1024 numbers YAMNet describes the sound with, which a trained model reads."""
         if len(audio) < MIN_SAMPLES:
             audio = np.pad(audio, (0, MIN_SAMPLES - len(audio)))
-        frames = self.session.run(["output_0"], {"waveform": audio.astype(np.float32)})[0]
+        frames, description = self.session.run(["output_0", "output_1"], {"waveform": audio.astype(np.float32)})
         mean = frames.mean(axis=0)
-        return SoundScores(float(mean[SPEECH].max()), float(mean[SINGING].max()), float(mean[MUSIC].max()))
+        scores = SoundScores(float(mean[SPEECH].max()), float(mean[SINGING].max()), float(mean[MUSIC].max()))
+        return scores, description.mean(axis=0)
+
+    def scores(self, audio: np.ndarray) -> SoundScores:
+        return self.analyse(audio)[0]
 
 
 class SingingGate:
@@ -94,6 +108,10 @@ class SingingGate:
         music = scores.music >= self.limits.min_music and scores.speech < self.limits.max_speech
         sung = scores.singing >= MIN_SINGING and scores.singing > scores.speech
         heard = (music or sung) and sum(self._voiced) / len(self._voiced) < self.limits.max_voiced
+        return self.decide(heard)
+
+    def decide(self, heard: bool) -> bool:
+        """One pass's verdict, from these rules or from a trained model; a single one doesn't change anything."""
         self._streak = self._streak + 1 if heard != self.singing else 0
         if self._streak >= (OFF_AFTER if self.singing else ON_AFTER):
             self.singing = heard

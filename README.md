@@ -99,8 +99,20 @@ Press **Settings** at the top of the main screen. These are the ones you are mos
 ![The Church tab](docs/images/settings-church.png)
 
 * **Name**: the names that must not be translated. Press the button after changing them.
-* **Church profile**: puts the name, languages and glossary in one file, to move to another PC or share with another church. No PINs or server details go in it.
+* **Church profile**: puts the name, languages, glossary and [training](#training-teach-it-your-churchs-songs) in one file, to move to another PC or share with another church. No PINs or server details go in it.
 * **Adjust song detection**: if songs get translated, or speech gets skipped, this lets you fix it. Turn on the service log for one service first. You then see that service as a bar, with what was skipped in orange. Move the slider, or click part of the bar and say whether it was music or speech, and the slider moves to what fits best.
+
+### Training: teach it your church's songs
+
+Live Translate can learn the sound of your own church, so it translates more of what is said and less of what is sung. It also misses less when someone talks over the band.
+
+1. Under **Add services**, paste YouTube links or press **Choose files…**, one per line if you type them. With the link of a channel or playlist you tick the services from a list.
+2. Press **Start training**. It takes a few minutes per service. You can stop and carry on later, and add more services at any time.
+3. The app tests what it learned on services it hasn't seen, and only uses it if it works at least as well as the standard detection. You see the numbers on the same page, and **Use standard detection** takes you back.
+
+You need at least two services, and more is better. You don't have to mark anything: the app finds the clear stretches of song and speech by itself and leaves the rest out. Recordings aren't kept, only a small summary of the sound in the `training` folder of the data folder. Use recordings of your own church only.
+
+Training can't run during a service. If translating starts, training stops by itself and carries on from there when you start it again. While a trained model is in use, the song detection slider under **Church** isn't used.
 
 ### Languages
 

@@ -20,7 +20,7 @@ from .integrations.subtitles import SubtitleOutput
 from .integrations.vmix import VmixOutput
 from .server.hub import Hub
 from .servicelog import ServiceLog
-from .stt.sound import SONG_LEVELS, SingingGate, SoundClassifier
+from .stt.sound import SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundClassifier, song_chance
 from .stt.transcriber import StreamingTranscriber, WhisperEngine
 from .translate.service import TranslationService
 from .tts.piper import SpeechService
@@ -283,14 +283,21 @@ class Pipeline:
             if self._sound is None:
                 return False
             try:
-                scores = self._sound.scores(audio)
+                scores, description = self._sound.analyse(audio)
                 voiced = engine.voiced(audio)
             except Exception:
                 log.exception("The sound classifier failed; songs won't be skipped")
                 self._sound = None
                 return False
-            gate.limits = SONG_LEVELS[self.settings.song_level]  # read per pass: calibrating applies right away
-            detected = gate.update(scores, voiced)
+            # Both read per pass: calibrating and training apply right away.
+            model = self.settings.song_model
+            chance = None
+            if model is None:
+                gate.limits = SONG_LEVELS[self.settings.song_level]
+                detected = gate.update(scores, voiced)
+            else:
+                chance = song_chance(np.asarray(model.weights, dtype=np.float32), model.bias, description)
+                detected = gate.decide(chance >= TRAINED_LIMIT)
             singing = detected and self.settings.skip_singing
             self._log(
                 "sound",
@@ -299,6 +306,7 @@ class Pipeline:
                 music=round(scores.music, 3),
                 voiced=round(voiced, 3),
                 detected=detected,
+                **({} if chance is None else {"trained": round(chance, 3)}),
             )
             if singing != self.singing:
                 self.singing = singing

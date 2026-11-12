@@ -30,6 +30,7 @@
       <button type="button" role="tab" data-tab="languages" data-t="tabLanguages"></button>
       <button type="button" role="tab" data-tab="quick" data-t="tabQuick"></button>
       <button type="button" role="tab" data-tab="glossary" data-t="tabGlossary"></button>
+      <button type="button" role="tab" data-tab="training" data-t="tabTraining"></button>
       <button type="button" role="tab" data-tab="streaming" data-t="tabStreaming"></button>
       <button type="button" role="tab" data-tab="network" data-t="tabNetwork"></button>
       <button type="button" role="tab" data-tab="startup" data-t="tabStartup"></button>
@@ -65,6 +66,7 @@
         <details id="calibration" class="server-setup">
           <summary data-t="calTitle"></summary>
           <p class="muted small" data-t="calHelp"></p>
+          <p id="calTrained" class="small" data-t="calTrained" hidden></p>
           <p id="calEmpty" class="small" data-t="calEmpty" hidden></p>
           <div id="calBody" hidden>
             <div class="row">
@@ -436,6 +438,67 @@
             <option value="tray" data-t="closeTray"></option>
             <option value="exit" data-t="closeStop"></option>
           </select>
+        </div>
+      </section>
+
+      <!-- Training -->
+      <section class="tab-panel" data-panel="training" role="tabpanel">
+        <h2 data-t="tabTraining"></h2>
+        <p data-t="trainIntro"></p>
+        <ol class="train-steps">
+          <li data-t="trainStep1"></li>
+          <li data-t="trainStep2"></li>
+          <li data-t="trainStep3"></li>
+        </ol>
+        <p class="muted small" data-t="trainNoLabel"></p>
+        <p class="muted small" data-t="trainOwn"></p>
+        <div class="train-in-use">
+          <strong id="trainInUse"></strong>
+          <button id="trainStandard" type="button" data-t="trainStandard" hidden></button>
+        </div>
+
+        <h2 data-t="trainAddTitle"></h2>
+        <textarea id="trainLinks" rows="4" spellcheck="false" data-t-placeholder="trainLinksHint"></textarea>
+        <div class="inline-buttons">
+          <button id="trainAdd" type="button" data-t="trainAdd"></button>
+          <button id="trainFiles" type="button" data-t="trainFiles" hidden></button>
+          <span id="trainAddStatus" class="small" role="status"></span>
+        </div>
+        <div id="trainPicker" class="train-picker" hidden>
+          <strong id="trainPickTitle"></strong>
+          <div class="inline-buttons">
+            <button id="trainPickAll" type="button" data-t="trainAll"></button>
+            <button id="trainPickNone" type="button" data-t="trainNone"></button>
+          </div>
+          <div id="trainPickList" class="train-list"></div>
+          <div class="inline-buttons">
+            <button id="trainPickAdd" class="primary" type="button"></button>
+            <button id="trainPickCancel" type="button" data-t="trainCancel"></button>
+          </div>
+        </div>
+
+        <h2 data-t="trainListTitle"></h2>
+        <p id="trainEmpty" class="muted small" data-t="trainEmpty"></p>
+        <ul id="trainSources" class="train-list train-sources"></ul>
+        <div class="inline-buttons">
+          <button id="trainStart" class="primary" type="button" data-t="trainStart"></button>
+          <button id="trainStop" type="button" data-t="trainStop" hidden></button>
+          <span id="trainMessage" class="small" role="status"></span>
+        </div>
+        <div id="trainProgress" class="wizard-progress" hidden><div id="trainProgressFill"></div></div>
+
+        <div id="trainResult" hidden>
+          <h2 data-t="trainResultTitle"></h2>
+          <p id="trainResultText"></p>
+          <table class="train-result small">
+            <thead><tr><td></td><th data-t="trainColStandard" scope="col"></th><th data-t="trainColTrained" scope="col"></th></tr></thead>
+            <tbody>
+              <tr><th data-t="trainRowSong" scope="row"></th><td id="trainSongRules"></td><td id="trainSongTrained"></td></tr>
+              <tr><th data-t="trainRowSpeech" scope="row"></th><td id="trainSpeechRules"></td><td id="trainSpeechTrained"></td></tr>
+              <tr><th data-t="trainRowMixed" scope="row"></th><td id="trainMixedRules"></td><td id="trainMixedTrained"></td></tr>
+            </tbody>
+          </table>
+          <p class="muted small" data-t="trainResultNote"></p>
         </div>
       </section>
 

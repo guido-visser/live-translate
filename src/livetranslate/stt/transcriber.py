@@ -307,6 +307,24 @@ class StreamingTranscriber:
         self.hyp.pop_committed(time_s)
 
 
+_vad_options = None
+
+
+def speech_parts(audio: np.ndarray) -> list[dict]:
+    """Where in this audio the voice detector hears someone."""
+    global _vad_options
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+    if _vad_options is None:
+        _vad_options = VadOptions(min_speech_duration_ms=150, min_silence_duration_ms=100, speech_pad_ms=0)
+    return get_speech_timestamps(audio, _vad_options)
+
+
+def voiced_share(audio: np.ndarray) -> float:
+    """The share of this audio that sounds like a voice."""
+    return sum(p["end"] - p["start"] for p in speech_parts(audio)) / max(1, len(audio))
+
+
 class WhisperEngine:
     """Loads a faster-whisper model and exposes the two functions the transcriber needs."""
 
@@ -339,7 +357,6 @@ class WhisperEngine:
         self.device = device
         self.language = language
         self.beam_size = settings.beam_size
-        self._vad_options = None
         self.on_segment: Callable[[str, float, float, bool], None] | None = None  # for the service log
 
     def transcribe(self, audio: np.ndarray, prompt: str, hotwords: str = "") -> list[Word]:
@@ -369,17 +386,9 @@ class WhisperEngine:
             words += [Word(w.start, w.end, w.word) for w in seg.words or []]
         return words
 
-    def _speech_parts(self, audio: np.ndarray) -> list[dict]:
-        from faster_whisper.vad import VadOptions, get_speech_timestamps
-
-        if self._vad_options is None:
-            self._vad_options = VadOptions(min_speech_duration_ms=150, min_silence_duration_ms=100, speech_pad_ms=0)
-        return get_speech_timestamps(audio, self._vad_options)
-
     def has_speech(self, audio: np.ndarray) -> bool:
-        return bool(self._speech_parts(audio))
+        return bool(speech_parts(audio))
 
     def voiced(self, audio: np.ndarray) -> float:
         """The share of this audio that sounds like a voice."""
-        parts = self._speech_parts(audio)
-        return sum(p["end"] - p["start"] for p in parts) / max(1, len(audio))
+        return voiced_share(audio)

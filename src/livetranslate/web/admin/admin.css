@@ -198,6 +198,22 @@ input[type=range] { width: 100%; }
 .check { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 8px; }
 .inline-buttons { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
 .save-status { margin: 0 8px 0 0; }
+.train-steps { padding-left: 22px; }
+.train-steps li { margin-bottom: 6px; }
+.train-in-use { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; }
+#trainLinks { width: 100%; box-sizing: border-box; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; resize: vertical; }
+.train-picker { padding: 10px 12px; margin: 8px 0; border: 1px solid var(--border); border-radius: 8px; }
+.train-list { max-height: 320px; overflow-y: auto; margin: 8px 0; padding: 0; list-style: none; }
+.train-list .check { margin-bottom: 4px; }
+.train-sources li { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--border); }
+.train-sources li:last-child { border-bottom: 0; }
+.train-source-text { flex: 1; min-width: 0; }
+.train-source-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.train-source-state { display: block; }
+.train-result { border-collapse: collapse; margin: 8px 0; }
+.train-result th, .train-result td { padding: 4px 16px 4px 0; text-align: left; font-weight: normal; }
+.train-result thead th { font-weight: 600; }
+.train-result td { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .glossary-wrap { overflow-x: auto; margin-bottom: 4px; }
 .glossary { width: 100%; border-collapse: collapse; }
 .glossary th { font-size: 13px; color: var(--muted); font-weight: 600; text-align: left; padding: 0 6px 6px 0; white-space: nowrap; }

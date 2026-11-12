@@ -32,6 +32,7 @@ dependencies = [
     "lameenc>=1.7",
     "pystray>=0.19",
     "pillow>=10",
+    "yt-dlp>=2025.1",
 ]
 
 [project.scripts]
