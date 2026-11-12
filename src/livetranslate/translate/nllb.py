@@ -14,6 +14,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from ..config import Settings
+from . import clean
 
 log = logging.getLogger(__name__)
 
@@ -111,7 +112,8 @@ class NllbTranslator:
         self._translator = None
         self._tokenizer = None
         self._loaded: tuple[str, str] | None = None
-        self._cache: OrderedDict[tuple[str, str, str], str] = OrderedDict()
+        self._cache: OrderedDict[tuple[str, str, str, bool], str] = OrderedDict()
+        self._blocked: dict[str, list[list[str]]] = {}  # per target language, see clean.py
         self._lock = asyncio.Lock()
         self._model_lock = threading.Lock()
         self.download_bar = None  # who hears about the download's progress; see firstrun.py
@@ -124,6 +126,7 @@ class NllbTranslator:
     def configure(self, settings: Settings) -> None:
         self.model = settings.translation.nllb_model
         self.device = settings.translation.nllb_device
+        self.clean_language = settings.translation.clean_language
         self.needs_restart = self._loaded is not None and self._loaded != (self.model, self.device)
 
     async def start(self) -> None:
@@ -192,7 +195,7 @@ class NllbTranslator:
     async def translate(self, text: str, source: str, target: str) -> str:
         if source == target or not text:
             return text
-        key = (text, source, target)
+        key = (text, source, target, self.clean_language)
         if key in self._cache:
             self._cache.move_to_end(key)
             return self._cache[key]
@@ -214,7 +217,16 @@ class NllbTranslator:
             beam_size=3,
             max_decoding_length=256,
             repetition_penalty=1.1,
+            suppress_sequences=self._blocked_for(target, tokenizer) if self.clean_language else None,
         )[0]
         out = [t for t in result.hypotheses[0] if t != tgt]
         ids = [tokenizer.token_to_id(t) for t in out]
         return tokenizer.decode([i for i in ids if i is not None], skip_special_tokens=True).strip()
+
+    def _blocked_for(self, target: str, tokenizer) -> list[list[str]] | None:
+        """Swear words NLLB may not write in this language (worked out once per language)."""
+        if target not in self._blocked:
+            self._blocked[target] = clean.blocked_sequences(
+                target, tokenizer.get_vocab(), lambda t: tokenizer.encode(t, add_special_tokens=False).tokens
+            )
+        return self._blocked[target] or None
