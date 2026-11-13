@@ -285,7 +285,7 @@ def test_starting_a_service_stops_training_and_keeps_the_place(tmp_path, monkeyp
     recording.write_bytes(b"x")
     trainer.add(str(recording))
     monkeypatch.setattr("faster_whisper.decode_audio", lambda *a, **k: np.zeros(16000 * 5, dtype=np.float32))
-    monkeypatch.setattr(training, "SoundClassifier", lambda gpu: object())
+    monkeypatch.setattr(training, "SoundClient", lambda gpu: object())
 
     def sampling(*_a, **_k):
         running.append(True)  # the operator presses start now
@@ -304,7 +304,7 @@ def test_one_bad_recording_does_not_stop_the_others(tmp_path, monkeypatch):
     for name in ("bad.mp4", "good.mp4"):
         (tmp_path / name).write_bytes(b"x")
         trainer.add(str(tmp_path / name))
-    monkeypatch.setattr(training, "SoundClassifier", lambda gpu: object())
+    monkeypatch.setattr(training, "SoundClient", lambda gpu: object())
 
     def decoding(path, sampling_rate):
         if path.endswith("bad.mp4"):

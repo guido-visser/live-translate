@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -27,6 +29,7 @@ ACCESS_VIOLATION = (-1073741819, 3221225477)
 _lock = threading.Lock()
 _onnx_error: str | None = None  # None: not checked yet; "": works
 _directml: bool | None = None  # None: not checked yet
+DIRECTML_OK_ENV = "LIVETRANSLATE_DIRECTML_OK"
 
 
 def vc_runtime_version() -> tuple[int, ...] | None:
@@ -122,6 +125,8 @@ def _directml_works() -> bool:
     """Checks once, in a separate process: a driver problem must not take the app down."""
     global _directml
     with _lock:
+        if _directml is None and os.environ.get(DIRECTML_OK_ENV) == "1":
+            _directml = True  # a GPU helper started again after a crash: checked before, saves a second
         if _directml is None:
             flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             model = Path(__file__).parent / "stt" / "yamnet.onnx"
@@ -140,25 +145,66 @@ def _directml_works() -> bool:
         return _directml
 
 
+# Every DirectML session in this process shares one Direct3D 12 device. Two sessions running
+# at once on different threads (the sound classifier and a Piper voice) crashed the NVIDIA
+# driver with an access violation that takes the whole app down (church PC, 13 Nov 2026), so
+# all DirectML work (loading, running, releasing) goes through this one lock.
+GPU_LOCK = threading.RLock()
+# Waits longer than this for the GPU are logged, to see whether taking turns costs delay.
+SLOW_WAIT_S = 0.5
+
+
+class GpuSession:
+    """An onnxruntime DirectML session that takes its turn on the GPU; otherwise the same."""
+
+    def __init__(self, session, name: str = ""):
+        self._session = session
+        self.name = name
+        self.longest_wait_s = 0.0
+
+    def run(self, *args, **kwargs):
+        start = time.perf_counter()
+        with GPU_LOCK:
+            waited = time.perf_counter() - start
+            self.longest_wait_s = max(self.longest_wait_s, waited)
+            if waited > SLOW_WAIT_S:
+                log.info("%s waited %.2f s for the GPU", self.name or "A model", waited)
+            return self._session.run(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._session, name)
+
+    def __del__(self):
+        session, self._session = self.__dict__.get("_session"), None
+        if session is not None:
+            try:
+                with GPU_LOCK:  # releasing GPU memory mid-run of another session is just as unsafe
+                    del session
+            except Exception:
+                pass
+
+
 def onnx_session(path: Path, gpu: bool = True, cpu_threads: int = 2):
     """An onnxruntime session on the GPU when possible.
 
+    On the GPU it is a GpuSession, so it never runs at the same moment as another one.
     On the CPU it stays on a few threads that don't spin: the default takes every core for a
     moment, which is what makes a livestream on the same PC stutter.
     """
     import onnxruntime as ort
 
     options = ort.SessionOptions()
-    providers = ["CPUExecutionProvider"]
     if gpu and "DmlExecutionProvider" in ort.get_available_providers() and _directml_works():
         # What DirectML requires.
         options.enable_mem_pattern = False
         options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        providers.insert(0, "DmlExecutionProvider")
-    else:
-        options.intra_op_num_threads = cpu_threads
-        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
-    return ort.InferenceSession(str(path), sess_options=options, providers=providers)
+        providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        with GPU_LOCK:
+            session = ort.InferenceSession(str(path), sess_options=options, providers=providers)
+        return GpuSession(session, Path(path).stem)
+    options.intra_op_num_threads = cpu_threads
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    return ort.InferenceSession(str(path), sess_options=options, providers=["CPUExecutionProvider"])
 
 
 def onnxruntime_failed() -> bool:

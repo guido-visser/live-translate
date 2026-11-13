@@ -43,7 +43,7 @@ def test_broken_onnxruntime_disables_voices_instead_of_crashing(monkeypatch, tmp
     bank = VoiceBank(tmp_path)
     assert not bank.has_voice("ru")
     with pytest.raises(RuntimeError, match="onnxruntime cannot be loaded"):
-        bank._voice("ru")
+        bank.prepare("ru")
 
 
 def test_pyaudio_never_starts_or_stops_on_two_threads_at_once(monkeypatch):
@@ -110,3 +110,35 @@ def test_install_error_shows_the_error_line_not_the_last_packages():
     output = "Resolved 80 packages\n  x Failed to build `sentencepiece==0.2.2`\nerror: build backend failed\n + tqdm==4.67.1\n"
     assert _first_error(output) == "x Failed to build `sentencepiece==0.2.2`"
     assert _first_error(" + tqdm==4.67.1\n") == "+ tqdm==4.67.1"
+
+
+def test_gpu_sessions_never_run_at_the_same_moment():
+    """Two DirectML sessions running at once crashed the NVIDIA driver and the app (13 Nov 2026)."""
+    busy = threading.Semaphore()
+    overlaps = []
+
+    class FakeSession:
+        def run(self, outputs, feeds):
+            if not busy.acquire(blocking=False):
+                overlaps.append(True)
+            else:
+                time.sleep(0.002)
+                busy.release()
+            return ["ok"]
+
+        def get_inputs(self):
+            return ["waveform"]
+
+    sessions = [native.GpuSession(FakeSession(), name) for name in ("yamnet", "en", "uk")]
+
+    def loop(session):
+        for _ in range(30):
+            assert session.run(None, {}) == ["ok"]
+
+    threads = [threading.Thread(target=loop, args=(s,)) for s in sessions]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not overlaps
+    assert sessions[0].get_inputs() == ["waveform"]  # everything else goes to the real session

@@ -15,12 +15,14 @@ import numpy as np
 
 from .audio.capture import AudioSource, FileSource, create_source
 from .config import SettingsStore
+from .guard import TRANSLATING_FILE
 from .integrations.obs import ObsOutput
 from .integrations.subtitles import SubtitleOutput
 from .integrations.vmix import VmixOutput
 from .server.hub import Hub
 from .servicelog import ServiceLog
-from .stt.sound import SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundClassifier, is_music, song_chance
+from .gpuhelper import HelperUnavailable, SoundClient, shared
+from .stt.sound import SONG_LEVELS, TRAINED_LIMIT, SingingGate, is_music, song_chance
 from .stt.transcriber import StreamingTranscriber, WhisperEngine
 from .translate.service import TranslationService
 from .tts.piper import SpeechService
@@ -65,7 +67,7 @@ class Pipeline:
         self.paused = False
         self.singing = False  # a song is being skipped right now
         self.service_log: ServiceLog | None = None
-        self._sound: SoundClassifier | None = None
+        self._sound: SoundClient | None = None
         self.error = ""
         self.history: deque[Segment] = deque(maxlen=60)
         self.stats = {"asr_pass_s": 0.0, "asr_buffer_s": 0.0, "translate_ms": 0.0, "device": ""}
@@ -83,6 +85,9 @@ class Pipeline:
         self._sentences: asyncio.Queue[tuple[str, float, str]] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
         self._lifecycle = asyncio.Lock()
+        # Tells the crash guard to let a restarted app translate on; a leftover one is stale.
+        self._translating_file = data_dir / TRANSLATING_FILE
+        self._mark_translating(False)
 
     @property
     def settings(self):
@@ -147,6 +152,7 @@ class Pipeline:
             self._thread = threading.Thread(target=self._asr_loop, name="asr", daemon=True)
             self._thread.start()
             self.state = "running"
+            self._mark_translating(True)
             self._broadcast_status()
 
     async def stop(self) -> None:
@@ -161,6 +167,7 @@ class Pipeline:
             self._source = None
             self._thread = None
             self.state = "stopped"
+            self._mark_translating(False)
             self.singing = False
             self._close_log()
             self.hub.partial(self.speaker_language, "")
@@ -171,6 +178,15 @@ class Pipeline:
             return
         await self.stop()
         await self.start()
+
+    def _mark_translating(self, on: bool) -> None:
+        try:
+            if on:
+                self._translating_file.touch()
+            else:
+                self._translating_file.unlink(missing_ok=True)
+        except OSError:
+            log.debug("Could not update %s", self._translating_file, exc_info=True)
 
     def set_gain(self, gain: float) -> None:
         if self._source is not None:
@@ -184,6 +200,10 @@ class Pipeline:
     def mark(self) -> None:
         """The operator noticed something; the log gets the moment to look at afterwards."""
         self._log("mark")
+
+    def event(self, kind: str, **fields) -> None:
+        """Something worth finding back in the service log (when it is on)."""
+        self._log(kind, **fields)
 
     def _log(self, kind: str, **fields) -> None:
         if self.service_log is not None:
@@ -250,7 +270,8 @@ class Pipeline:
 
     def _load_sound(self) -> None:
         try:
-            self._sound = SoundClassifier(self.settings.gpu_helpers)
+            shared().enable()  # after crashing too often the GPU helper waits for a new start
+            self._sound = SoundClient(self.settings.gpu_helpers)
         except Exception:  # translating everything beats not translating at all
             log.exception("The sound classifier could not start; songs won't be skipped")
             self._sound = None
@@ -295,6 +316,12 @@ class Pipeline:
             try:
                 scores, description = self._sound.analyse(audio)
                 voiced = engine.voiced(audio)
+            except HelperUnavailable:
+                # The GPU helper is starting again after a crash: let the text through meanwhile.
+                if self.singing:
+                    self.singing = False
+                    loop.call_soon_threadsafe(self._broadcast_status)
+                return False
             except Exception:
                 log.exception("The sound classifier failed; songs won't be skipped")
                 self._sound = None

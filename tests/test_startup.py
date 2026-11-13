@@ -236,7 +236,7 @@ def test_the_app_closes_while_a_phone_is_listening(tmp_path):
     speech = app.state.services.speech
     speech.bank.has_voice = lambda lang: True
     speech.bank._files = lambda lang, progress=None: None
-    speech.bank._voice = lambda lang: None
+    speech.bank.prepare = lambda lang: None
 
     listening = socket.create_server(("127.0.0.1", 0))
     port = listening.getsockname()[1]

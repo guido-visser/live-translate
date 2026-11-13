@@ -16,9 +16,9 @@ from pathlib import Path
 
 import httpx
 import numpy as np
-import soxr
 
-from ..native import onnx_session, onnxruntime_failed, require_onnxruntime
+from ..gpuhelper import LOAD_TIMEOUT_S, GpuHelper, HelperError, HelperUnavailable, shared
+from ..native import onnxruntime_failed, require_onnxruntime
 
 log = logging.getLogger(__name__)
 
@@ -81,15 +81,21 @@ def _silence_preroll(seconds: float) -> bytes:
 
 
 class VoiceBank:
-    """Downloads Piper voices on demand and synthesizes speech (blocking; run in a thread)."""
+    """Downloads Piper voices on demand; the GPU helper speaks them (blocking; run in a thread)."""
 
-    def __init__(self, voices_dir: Path):
+    def __init__(self, voices_dir: Path, helper: GpuHelper | None = None):
         self.dir = voices_dir
         self.dir.mkdir(parents=True, exist_ok=True)
-        self._voices: dict = {}
         self._failed: set[str] = set()
         self._lock = threading.Lock()
         self.gpu = True
+        self._helper = helper
+
+    @property
+    def helper(self) -> GpuHelper:
+        if self._helper is None:
+            self._helper = shared()
+        return self._helper
 
     def has_voice(self, lang: str) -> bool:
         return lang in VOICES and lang not in self._failed and not onnxruntime_failed()
@@ -98,7 +104,11 @@ class VoiceBank:
         """Voices load again on the chosen processor when they're next used."""
         with self._lock:
             self.gpu = gpu
-            self._voices.clear()
+            self.helper.forget("voice:")
+            try:
+                self.helper.call("unload_voices")
+            except (HelperUnavailable, HelperError):
+                pass  # not running: nothing loaded
 
     def _local(self, lang: str) -> tuple[Path, Path]:
         onnx = self.dir / (VOICES[lang].rsplit("/", 1)[1] + ".onnx")
@@ -140,51 +150,31 @@ class VoiceBank:
                 tmp.replace(target)
         return onnx, meta
 
-    def _voice(self, lang: str):
-        with self._lock:
-            if lang in self._voices:
-                return self._voices[lang]
-            require_onnxruntime()  # Piper runs on onnxruntime, which can crash the app on import
-            from piper import PiperVoice
-
-            try:
-                onnx, meta = self._files(lang)
-                voice = PiperVoice.load(onnx, config_path=meta)
-                voice.session = onnx_session(onnx, self.gpu)
-            except Exception:
-                log.exception("Could not load Piper voice for %s", lang)
-                self._failed.add(lang)
-                raise
-            self._voices[lang] = voice
-            return voice
+    def prepare(self, lang: str) -> None:
+        """Download the voice when needed and load it in the GPU helper (blocking)."""
+        require_onnxruntime()  # Piper runs on onnxruntime, which can crash on import
+        try:
+            onnx, meta = self._files(lang)
+        except Exception:
+            log.exception("Could not download the Piper voice for %s", lang)
+            self._failed.add(lang)
+            raise
+        args = (str(onnx), str(meta), self.gpu)
+        self.helper.remember(f"voice:{lang}", "voice", args)
+        try:
+            self.helper.call("voice", *args, wait=True, timeout=LOAD_TIMEOUT_S)
+        except HelperError:
+            log.error("Could not load the Piper voice for %s", lang, exc_info=True)
+            self.helper.forget(f"voice:{lang}")
+            self._failed.add(lang)
+            raise
 
     def synthesize(self, lang: str, text: str, length_scale: float = 1.0) -> np.ndarray:
-        """Returns int16 mono audio at STREAM_RATE."""
-        from piper import SynthesisConfig
-
-        from piper.config import PhonemeType
-
-        voice = self._voice(lang)
-        if voice.config.phoneme_type == PhonemeType.TEXT:
-            text = text.lower()  # character-based voices (e.g. Ukrainian) only know lowercase letters
-        parts, rate = [], STREAM_RATE
-        config = SynthesisConfig(length_scale=length_scale)
-        try:
-            chunks = list(voice.synthesize(text, syn_config=config))
-        except Exception:
-            # E.g. the GPU ran out of memory or the driver restarted. Try once on the CPU.
-            log.exception("Voice for %s failed; continuing on the CPU", lang)
-            voice.session = onnx_session(self._files(lang)[0], gpu=False)
-            chunks = list(voice.synthesize(text, syn_config=config))
-        for chunk in chunks:
-            parts.append(chunk.audio_float_array)
-            rate = chunk.sample_rate
-        if not parts:
-            return np.zeros(0, dtype=np.int16)
-        audio = np.concatenate(parts).astype(np.float32)
-        if rate != STREAM_RATE:
-            audio = soxr.resample(audio, rate, STREAM_RATE)
-        return (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+        """int16 mono audio at STREAM_RATE. Raises HelperUnavailable while the GPU helper is away."""
+        onnx, meta = self._local(lang)
+        if not onnx.exists() or not meta.exists():
+            onnx, meta = self._files(lang)
+        return self.helper.call("synthesize", str(onnx), str(meta), self.gpu, text, length_scale)
 
 
 class LanguageStream:
@@ -230,9 +220,10 @@ class LanguageStream:
     async def _synth(self) -> None:
         gap = np.zeros(int(STREAM_RATE * 0.15), dtype=np.int16)
         try:
-            await asyncio.to_thread(self.bank._voice, self.lang)  # before the first sentence needs it
+            await asyncio.to_thread(self.bank.prepare, self.lang)  # before the first sentence needs it
         except Exception:
             log.exception("Could not load the voice for %s", self.lang)
+        away = False  # the GPU helper is starting again after a crash: sentences go unspoken
         while True:
             text = await self._texts.get()
             # Speak faster as soon as we fall behind the speaker: translations are often
@@ -241,9 +232,17 @@ class LanguageStream:
             length_scale = 1.0 if backlog < 1.5 else 0.85 if backlog < 4 else 0.75
             try:
                 audio = await asyncio.to_thread(self.bank.synthesize, self.lang, text, length_scale)
+            except HelperUnavailable as exc:
+                if not away:
+                    log.warning("Spoken %s pauses: %s", self.lang, exc)
+                away = True
+                continue
             except Exception:
                 log.exception("TTS failed for %s", self.lang)
                 continue
+            if away:
+                log.info("Spoken %s goes on", self.lang)
+                away = False
             self._add(np.concatenate((audio, gap)))
 
     def _add(self, sentence: np.ndarray) -> None:

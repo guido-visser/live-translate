@@ -26,7 +26,8 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 from .config import SongModel
-from .stt.sound import ON_AFTER, SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundClassifier, SoundScores, song_chance
+from .gpuhelper import SoundClient
+from .stt.sound import ON_AFTER, SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundScores, song_chance
 
 log = logging.getLogger(__name__)
 
@@ -235,7 +236,7 @@ def verdict(comparison: dict) -> str:
 # -- reading a recording ---------------------------------------------------------------------------
 
 
-def describe(audio: np.ndarray, classifier: SoundClassifier, voiced, tick: Callable[[float], None]) -> tuple[np.ndarray, np.ndarray]:
+def describe(audio: np.ndarray, classifier: SoundClient, voiced, tick: Callable[[float], None]) -> tuple[np.ndarray, np.ndarray]:
     rows, descriptions = [], []
     last = len(audio) // RATE - WINDOW_S
     for second in range(0, last + 1, PASS_S):
@@ -576,7 +577,7 @@ class Trainer:
             for source in [s for s in self.sources if s["state"] in ("waiting", "error")]:
                 self._check()
                 if classifier is None:
-                    classifier = SoundClassifier(self.gpu())
+                    classifier = SoundClient(self.gpu())
                 if any(s["id"] == source["id"] for s in self.sources):
                     self._read_source(source, classifier)
             classifier = None
@@ -593,7 +594,7 @@ class Trainer:
                 self.state, self.current, self.step, self.share = "idle", None, "", 0.0
             self._save()
 
-    def _read_source(self, source: dict, classifier: SoundClassifier) -> None:
+    def _read_source(self, source: dict, classifier: SoundClient) -> None:
         from faster_whisper import decode_audio
 
         from .stt.transcriber import voiced_share

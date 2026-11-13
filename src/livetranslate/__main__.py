@@ -176,6 +176,7 @@ def main() -> None:
     parser.add_argument("--autostart", action="store_true", help="started with Windows: show what the settings say")
     parser.add_argument("--no-tray", action="store_true", help="no system tray icon (e.g. on a server)")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--no-guard", action="store_true", help="don't start the app again after a crash")
     # When the app starts itself again (see health.py):
     parser.add_argument("--after", type=int, help=argparse.SUPPRESS)  # wait for this process to end
     parser.add_argument("--restarts", type=int, default=0, help=argparse.SUPPRESS)
@@ -238,6 +239,13 @@ def main() -> None:
         return
 
     lower_priority()
+    if not args.no_guard:
+        from . import guard
+
+        try:
+            guard.start(data, sys.argv[1:])
+        except Exception:
+            log.warning("Could not start the crash guard; after a crash the app won't come back by itself", exc_info=True)
     if store.settings.start_with_windows:
         autostart.apply(True)  # the install folder may have changed
 

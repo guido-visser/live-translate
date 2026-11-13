@@ -306,6 +306,7 @@ def create_app(
         asyncio.create_task(services.speech.warm_up(lang))
         stream = services.speech.stream(lang)
         queue = stream.subscribe()
+        services.pipeline.event("audio_listener", lang=lang, listeners=len(stream.clients))
 
         async def body():
             try:
@@ -313,6 +314,7 @@ def create_app(
                     yield await queue.get()
             finally:
                 stream.unsubscribe(queue)
+                services.pipeline.event("audio_listener", lang=lang, listeners=len(stream.clients))
 
         headers = {"Cache-Control": "no-cache, no-store", "X-Content-Type-Options": "nosniff"}
         return StreamingResponse(body(), media_type="audio/mpeg", headers=headers)

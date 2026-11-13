@@ -65,6 +65,10 @@ Filename: "{win}\explorer.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Flags
 [Registry]
 ; Written by the app (Settings → Startup); only here so that uninstalling removes it.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "LiveTranslate"; Flags: dontcreatekey uninsdeletevalue
+; A crash in native code (e.g. a GPU driver) leaves a small dump in %LOCALAPPDATA%\CrashDumps of the
+; user that ran the app, so the next one can be looked into (13 Nov 2026 left nothing to look at).
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\pythonw.exe"; ValueType: dword; ValueName: "DumpType"; ValueData: 1; Flags: uninsdeletekey
+Root: HKLM64; Subkey: "SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\pythonw.exe"; ValueType: dword; ValueName: "DumpCount"; ValueData: 5
 
 [UninstallDelete]
 Type: files; Name: "{app}\VERSION"

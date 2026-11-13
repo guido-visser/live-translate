@@ -135,6 +135,8 @@
       state.connected = true;
       updateBanner();
       if (state.lang) send({ type: "lang", lang: state.lang });
+      // Back after a break: get the sound back now instead of waiting for the next retry.
+      if (state.audioOn && (audioRetry || audio.error || audio.ended)) startAudio(false);
     };
     ws.onmessage = (ev) => handle(JSON.parse(ev.data));
     ws.onclose = () => {
@@ -254,23 +256,58 @@
     if (!available && state.audioOn) stopAudio();
   }
 
-  function startAudio() {
+  // When the stream breaks (e.g. the app on the church PC starts again after a crash) the
+  // phone keeps trying to get it back, with growing pauses, until the listener stops it.
+  let audioRetry = null;
+  let audioRetries = 0;
+
+  function retryAudio() {
+    if (!state.audioOn || audioRetry) return;
+    const wait = Math.min(2000 * 2 ** audioRetries++, 10000);
+    audioRetry = setTimeout(() => {
+      audioRetry = null;
+      if (state.audioOn) startAudio(false);
+    }, wait);
+  }
+
+  function startAudio(byListener = true) {
     state.audioOn = true;
+    clearTimeout(audioRetry);
+    audioRetry = null;
+    if (byListener) audioRetries = 0;
     audio.src = `/audio/${state.lang}.mp3?t=${Date.now()}`;
     const play = audio.play();
-    if (play) play.catch(() => { stopAudio(); toast(t("audioError")); });
+    if (play) {
+      play.catch((err) => {
+        if (err && err.name === "AbortError") return; // a newer attempt replaced this one
+        if (err && err.name === "NotAllowedError") {
+          // The browser won't start sound without a tap (e.g. a locked phone after a break).
+          stopAudio();
+          toast(t("audioError"));
+          return;
+        }
+        retryAudio(); // the server can't be reached right now
+      });
+    }
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({ title: t("title"), artist: langInfo(state.lang)?.name || "" });
     }
     clearInterval(audioWatch);
-    // Stay close to live: if the browser buffered too much, jump ahead.
+    let lastTime = -1;
+    let stuck = 0;
     audioWatch = setInterval(() => {
+      // Stay close to live: if the browser buffered too much, jump ahead.
       try {
         if (audio.buffered.length) {
           const end = audio.buffered.end(audio.buffered.length - 1);
           if (end - audio.currentTime > 4) audio.currentTime = end - 0.5;
         }
       } catch { /* not seekable */ }
+      // The server sends sound (or silence) all the time: standing still means the stream broke.
+      if (audio.currentTime > 0 && audio.currentTime !== lastTime) audioRetries = 0;
+      stuck = audio.currentTime === lastTime && !audio.paused ? stuck + 1 : 0;
+      lastTime = audio.currentTime;
+      if (stuck >= 3) { stuck = 0; retryAudio(); }
     }, 3000);
     renderAudioState();
   }
@@ -278,6 +315,8 @@
   function stopAudio() {
     state.audioOn = false;
     clearInterval(audioWatch);
+    clearTimeout(audioRetry);
+    audioRetry = null;
     audio.pause();
     audio.removeAttribute("src");
     audio.load();
@@ -292,9 +331,8 @@
     $("audioLabel").textContent = state.audioOn ? t("listening") : t("listen");
   }
 
-  audio.addEventListener("error", () => {
-    if (state.audioOn) setTimeout(() => state.audioOn && startAudio(), 2000);
-  });
+  audio.addEventListener("error", retryAudio);
+  audio.addEventListener("ended", retryAudio); // an endless stream only ends when the connection does
 
   $("audioBtn").addEventListener("click", () => {
     if (state.audioOn) stopAudio();
