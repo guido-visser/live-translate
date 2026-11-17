@@ -34,6 +34,7 @@ class AudioSource:
         self._callback: AudioCallback | None = None
         self._resampler: soxr.ResampleStream | None = None
         self._in_rate = SAMPLE_RATE
+        self._last_signal = time.monotonic()
 
     def _setup(self, in_rate: int) -> None:
         self._in_rate = in_rate
@@ -49,6 +50,8 @@ class AudioSource:
         else:
             mono = block.mean(axis=1)
         mono = np.ascontiguousarray(mono, dtype=np.float32)
+        if mono.any():  # an open input always hisses a little; all zeros is no signal at all
+            self._last_signal = time.monotonic()
         if self.gain != 1.0:
             mono = np.clip(mono * self.gain, -1.0, 1.0)
         if mono.size:
@@ -60,6 +63,10 @@ class AudioSource:
             mono = self._resampler.resample_chunk(mono)
         if mono.size and self._callback is not None:
             self._callback(mono)
+
+    def silent_s(self) -> float:
+        """Seconds since the last block that held any signal (also counts while no blocks come at all)."""
+        return time.monotonic() - self._last_signal
 
     def start(self, callback: AudioCallback) -> None:
         raise NotImplementedError
@@ -80,6 +87,7 @@ class DeviceSource(AudioSource):
         import sounddevice as sd
 
         self._callback = callback
+        self._last_signal = time.monotonic()
         first = resolve_input_device(self.device_id)
         candidates = [first, *same_device_other_apis(self.device_id)]
         for attempt, index in enumerate(candidates):
@@ -119,6 +127,19 @@ class DeviceSource(AudioSource):
             self._stream.stop()
             self._stream.close()
             self._stream = None
+
+    def reopen(self) -> None:
+        """Close the device and open it again, as stopping and starting translation does.
+
+        The next try is a full NO_SIGNAL_S later, also when this one fails."""
+        self._last_signal = time.monotonic()
+        try:
+            self.stop()
+        except Exception as exc:  # a device that is gone can't always be stopped cleanly
+            log.warning("Closing the audio device failed: %s", exc)
+            self._stream = None
+        assert self._callback is not None
+        self.start(self._callback)
 
 
 class LoopbackSource(AudioSource):

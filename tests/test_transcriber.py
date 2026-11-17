@@ -148,6 +148,38 @@ def test_a_made_up_sentence_is_dropped_and_kept_out_of_the_prompt():
     assert "Kandelaar" not in t.context
 
 
+def test_an_unsure_sentence_is_dropped_and_kept_out_of_the_prompt():
+    # 15 Nov 2026: "we zijn vrouw." came first at -1.69 over music; once in the prompt, Whisper
+    # repeated it for twelve minutes, then with high confidence.
+    out: list[str] = []
+    t = StreamingTranscriber(lambda a, p: [], lambda a: True, lambda p: None, out.append, AsrSettings())
+    t.pending = [Word(0, 0.3, " we", -1.69), Word(0.3, 0.6, " zijn", -1.69), Word(0.6, 1.0, " vrouw.", -1.69)]
+    t._emit_sentences()
+    t.pending = [Word(1, 1.5, " Welkom", -0.3), Word(1.5, 2.0, " allemaal.", -0.2)]
+    t._emit_sentences()
+    assert out == ["Welkom allemaal."]
+    assert "vrouw" not in t.context
+
+
+def test_a_sentence_over_two_segments_counts_its_words():
+    out: list[str] = []
+    t = StreamingTranscriber(lambda a, p: [], lambda a: True, lambda p: None, out.append, AsrSettings())
+    # Three sure words and one unsure one: on average sure enough.
+    t.pending = [Word(0, 0.5, " Dank", -0.2), Word(0.5, 1, " u", -0.2), Word(1, 1.5, " wel", -0.2), Word(1.5, 2, " Heer.", -1.5)]
+    t._emit_sentences()
+    assert out == ["Dank u wel Heer."]
+
+
+def test_confidence_survives_agreeing_on_words():
+    hyp = HypothesisBuffer()
+    hyp.insert([Word(0.0, 0.5, " Goede", -0.4), Word(0.5, 1.0, " morgen", -0.4)], offset=10.0)
+    hyp.flush()
+    hyp.insert([Word(0.0, 0.5, " Goede", -0.3), Word(0.5, 1.0, " morgen", -0.3)], offset=10.0)
+    committed = hyp.flush()
+    assert [w.logprob for w in committed] == [-0.3, -0.3]
+    assert committed[0].start == 10.0
+
+
 def test_a_sentence_stuck_in_a_loop_is_noticed():
     # From the service of 8 Nov 2026, cut off mid-word where Whisper ran out of room.
     assert is_loop("Kandelaar, " + "de Kandelaar, " * 40 + "de K")

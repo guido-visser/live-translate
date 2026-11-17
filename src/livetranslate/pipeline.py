@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .audio.capture import AudioSource, FileSource, create_source
+from .audio.capture import AudioSource, DeviceSource, FileSource, create_source
 from .config import SettingsStore
 from .guard import TRANSLATING_FILE
 from .integrations.obs import ObsOutput
@@ -28,6 +28,11 @@ from .translate.service import TranslationService
 from .tts.piper import SpeechService
 
 log = logging.getLogger(__name__)
+
+# An audio device that delivers nothing at all (not even the hiss of an open input) for this
+# long is opened again, as a restart would. A USB interface that lost its connection for a
+# moment otherwise stays silent until someone notices.
+NO_SIGNAL_S = 60
 
 
 try:
@@ -66,6 +71,7 @@ class Pipeline:
         self.state = "stopped"  # stopped|loading|running
         self.paused = False
         self.singing = False  # a song is being skipped right now
+        self.no_signal = False  # the audio device delivers nothing; it is opened again every minute
         self.service_log: ServiceLog | None = None
         self._sound: SoundClient | None = None
         self.error = ""
@@ -108,6 +114,7 @@ class Pipeline:
             "error": self.error,
             "speaker_language": self.speaker_language,
             "singing": self.singing,
+            "no_signal": self.no_signal,
             "skip_singing": self.settings.skip_singing,
             "logging": self.service_log is not None,
         }
@@ -148,8 +155,12 @@ class Pipeline:
                 self._source = None
                 self._broadcast_status()
                 return
-            self._stop.clear()
-            self._thread = threading.Thread(target=self._asr_loop, name="asr", daemon=True)
+            # A new event and queue per start: a recognition thread that didn't end in time
+            # (stuck in a GPU call) must not pick up again next to the new one when it comes back.
+            self._stop = threading.Event()
+            self._thread = threading.Thread(
+                target=self._asr_loop, args=(self._stop, self._audio), name="asr", daemon=True
+            )
             self._thread.start()
             self.state = "running"
             self._mark_translating(True)
@@ -164,11 +175,14 @@ class Pipeline:
                 await asyncio.to_thread(self._source.stop)
             if self._thread is not None:
                 await asyncio.to_thread(self._thread.join, 10)
+                if self._thread.is_alive():
+                    log.error("The recognition thread didn't stop within 10 s; it is left to end by itself")
             self._source = None
             self._thread = None
             self.state = "stopped"
             self._mark_translating(False)
             self.singing = False
+            self.no_signal = False
             self._close_log()
             self.hub.partial(self.speaker_language, "")
             self._broadcast_status()
@@ -282,7 +296,7 @@ class Pipeline:
         if not self.paused:
             self._audio.put(chunk)
 
-    def _asr_loop(self) -> None:
+    def _asr_loop(self, stop: threading.Event, audio_queue: queue.Queue) -> None:
         assert self._engine is not None and self._loop is not None
         loop = self._loop
         engine = self._engine
@@ -297,11 +311,14 @@ class Pipeline:
         music = False  # the latest sound check heard mostly music, and no speech
 
         def transcribe(audio: np.ndarray, prompt: str):
-            # Over music Whisper hears no words and writes down the glossary words it was given
-            # instead ("De Kandelaar, de Kandelaar, ..."), so it only gets them when someone talks.
-            # Read per pass, so glossary changes apply without a restart.
-            hotwords = "" if music else self.translator.glossary.hotwords(engine.language)
-            return engine.transcribe(audio, prompt, hotwords)
+            # Over music Whisper hears no words and writes down what it was given instead: the
+            # glossary words ("De Kandelaar, de Kandelaar, ...") or the earlier text in the prompt
+            # ("we zijn vrouw." for twelve minutes on 15 Nov 2026). So it only gets them when
+            # someone talks. This works with song skipping off too. Read per pass, so glossary
+            # changes apply without a restart.
+            if music:
+                return engine.transcribe(audio, "", "")
+            return engine.transcribe(audio, prompt, self.translator.glossary.hotwords(engine.language))
 
         def is_noise(text: str) -> bool:
             return self.translator.glossary.only_repeats(text, engine.language)
@@ -365,13 +382,14 @@ class Pipeline:
             transcribe, engine.has_speech, on_partial, on_sentence, self.settings.asr, is_singing, is_noise
         )
         was_paused = False
-        while not self._stop.is_set():
+        while not stop.is_set():
             try:
-                feed(self._audio.get(timeout=0.2))
+                feed(audio_queue.get(timeout=0.2))
                 while True:  # drain everything that arrived while we were busy
-                    feed(self._audio.get_nowait())
+                    feed(audio_queue.get_nowait())
             except queue.Empty:
                 pass
+            self._check_signal(self._source)
             if self.speaker_language != engine.language:
                 # Finish what the previous speaker said, then listen in the new language.
                 transcriber.finalize()
@@ -388,7 +406,7 @@ class Pipeline:
                     transcriber.reset()
                 continue
             source = self._source
-            file_done = isinstance(source, FileSource) and source.finished.is_set() and self._audio.empty()
+            file_done = isinstance(source, FileSource) and source.finished.is_set() and audio_queue.empty()
             if transcriber.ready() or (file_done and transcriber.buffer_seconds > 0.3):
                 try:
                     transcriber.process()
@@ -401,6 +419,30 @@ class Pipeline:
                 log.info("Audio file finished")
                 loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self.stop()))
                 return
+
+    def _check_signal(self, source: AudioSource | None) -> None:
+        """Open the audio device again when it has delivered no signal at all for a while.
+
+        Only for capture devices: a loopback gets nothing whenever nothing plays, and a file ends.
+        """
+        if not isinstance(source, DeviceSource):
+            return
+        silent = source.silent_s()
+        if silent < NO_SIGNAL_S:
+            if self.no_signal:
+                log.info("The audio device delivers a signal again")
+                self.no_signal = False
+                self._loop.call_soon_threadsafe(self._broadcast_status)
+            return
+        log.warning("No signal from the audio device for %.0f s; opening it again", silent)
+        self._log("audio_reopened", silent_s=round(silent))
+        if not self.no_signal:
+            self.no_signal = True
+            self._loop.call_soon_threadsafe(self._broadcast_status)
+        try:
+            source.reopen()
+        except Exception:
+            log.exception("Opening the audio device again failed; trying again in %d s", NO_SIGNAL_S)
 
     # -- translation -----------------------------------------------------------
 

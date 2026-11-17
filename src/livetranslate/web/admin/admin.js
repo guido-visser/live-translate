@@ -34,8 +34,9 @@
     $("pauseBtn").disabled = status.state !== "running";
     $("pauseBtn").textContent = status.paused ? t("resume") : t("pause");
     $("pauseBtn").classList.toggle("warn", status.paused);
-    $("error").textContent = status.error || "";
-    $("error").hidden = !status.error;
+    const error = status.no_signal ? t("noSignal") : status.error || "";
+    $("error").textContent = error;
+    $("error").hidden = !error;
     $("singingPill").hidden = !status.singing;
     $("loggingPill").hidden = !status.logging;
     $("markRow").hidden = !status.logging;

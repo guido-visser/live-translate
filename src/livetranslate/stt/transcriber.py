@@ -52,6 +52,11 @@ CAPTION_MIN_CAPITALS = 5  # shorter words in capitals may be real ("EO", "HGJB")
 MAX_REPEATS = 2  # the same sentence this many extra times in a row is dropped from then on
 LOOP_MIN_WORDS = 12  # a sentence this long ...
 LOOP_SHARE = 4  # ... with only one different word in this many is Whisper looping
+# Whisper's own confidence (average log-probability) below which a sentence is dropped. Speech
+# scores about -0.24; in the service of 15 Nov 2026 only 16 of 951 spoken sentences were below
+# -1.0, all of them garbled ("Klaar Lepitsbeke?", "is on..."), and the made-up "we zijn vrouw"
+# that Whisper then repeated for twelve minutes started at -1.69.
+MIN_LOGPROB = -1.0
 SOUND_WINDOW_S = 2.0  # audio the singing check looks at; keep in step with sound.WINDOW_S
 SONG_NOTICED_AFTER_S = 4.0  # a song has been going for about this long when the check is sure
 
@@ -65,6 +70,7 @@ class Word:
     start: float
     end: float
     text: str
+    logprob: float = 0.0  # the confidence of the Whisper segment this word came from
 
 
 def _norm(text: str) -> str:
@@ -106,7 +112,7 @@ class HypothesisBuffer:
         self.last_committed_time = 0.0
 
     def insert(self, words: list[Word], offset: float) -> None:
-        shifted = [Word(w.start + offset, w.end + offset, w.text) for w in words]
+        shifted = [Word(w.start + offset, w.end + offset, w.text, w.logprob) for w in words]
         self.new = [w for w in shifted if w.start > self.last_committed_time - 0.1]
         if not self.new or not self.committed:
             return
@@ -297,6 +303,12 @@ class StreamingTranscriber:
         self.last_sentence_end = words[-1].end
         if not text or not _norm(text):
             return
+        confidence = sum(w.logprob for w in words) / len(words)
+        if confidence < MIN_LOGPROB:
+            # Also kept out of the prompt: Whisper trusts its prompt, so over music it would
+            # repeat this guess, and then with high confidence.
+            log.info("Dropped an unsure sentence (%.2f): %r", confidence, text[:120])
+            return
         if is_loop(text) or (self.is_noise is not None and self.is_noise(text)):
             log.info("Dropped a made-up sentence: %r", text[:120])
             return  # also out of the prompt: there it would pull Whisper towards more of it
@@ -401,7 +413,7 @@ class WhisperEngine:
                 self.on_segment(seg.text, seg.avg_logprob, seg.no_speech_prob, dropped)
             if dropped:
                 continue
-            words += [Word(w.start, w.end, w.word) for w in seg.words or []]
+            words += [Word(w.start, w.end, w.word, seg.avg_logprob) for w in seg.words or []]
         return words
 
     def has_speech(self, audio: np.ndarray) -> bool:
