@@ -206,6 +206,19 @@ To remove that as well, tick **Also remove all data** when the uninstaller asks.
 | The setup says the data folder can't be reached | Connect the drive it's on, and start Live Translate again. |
 | Still stuck | [Report it on GitHub](../../issues), and include `livetranslate.log` from the data folder. It's shown under **Settings → About**. |
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+The installer is built from this repository by GitHub Actions ([build.yml](.github/workflows/build.yml)) and signed only for a tagged release, after the approver has checked the signing request by hand.
+
+* Committers and reviewers: [Guido Visser](https://github.com/guido-visser)
+* Approvers: [Guido Visser](https://github.com/guido-visser)
+
+## Privacy
+
+Live Translate doesn't collect or send any information about you, your church or your listeners. The audio, the transcripts and the translations stay on the PC, and on the phones that open its page. It only goes online to download models, updates and the training videos you choose, and to send to systems you set up yourself. See the [privacy policy](PRIVACY.md).
+
 ---
 
 # For developers

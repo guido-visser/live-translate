@@ -1,6 +1,15 @@
 # Builds packaging\windows\Output\LiveTranslate-Setup-<version>.exe
 # Requires Inno Setup 6 (https://jrsoftware.org/isdl.php or: winget install JRSoftware.InnoSetup).
-param([string]$UvVersion = "0.13.6")
+#
+# Signed release builds (build.yml) call it twice with -SignedUninstallerDir:
+#   1. -UninstallerOnly: Inno Setup writes uninst-<version>-<hash>.e32 to that folder and stops;
+#      the workflow has it signed.
+#   2. With the signed .e32 in that folder: the installer, with a signed uninstaller and temp copy.
+param(
+    [string]$UvVersion = "0.13.6",
+    [string]$SignedUninstallerDir = "",
+    [switch]$UninstallerOnly
+)
 $ErrorActionPreference = "Stop"
 
 $here = $PSScriptRoot
@@ -36,6 +45,20 @@ $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
 if (-not $iscc) { $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe" }
 if (-not (Test-Path $iscc)) { throw "Inno Setup 6 not found" }
 
-& $iscc "/DAppVersion=$version" (Join-Path $here "LiveTranslate.iss")
-if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+$isccArgs = @("/DAppVersion=$version")
+if ($SignedUninstallerDir) {
+    New-Item -ItemType Directory -Force $SignedUninstallerDir | Out-Null
+    $SignedUninstallerDir = (Resolve-Path $SignedUninstallerDir).Path
+    $isccArgs += "/DSignedUninstallerDir=$SignedUninstallerDir"
+}
+& $iscc @isccArgs (Join-Path $here "LiveTranslate.iss")
+$exit = $LASTEXITCODE
+if ($UninstallerOnly) {
+    # Inno Setup stops on purpose here ("please attach your digital signature"); the .e32 is what we want.
+    $e32 = Get-ChildItem $SignedUninstallerDir -Filter "uninst-*.e32" | Select-Object -First 1
+    if (-not $e32) { throw "Inno Setup wrote no uninstaller to sign (exit code $exit)" }
+    Write-Host "Uninstaller to sign: $($e32.FullName)"
+    exit 0
+}
+if ($exit -ne 0) { throw "Inno Setup failed" }
 Write-Host "Installer written to $(Join-Path $here 'Output')"

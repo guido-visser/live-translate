@@ -24,6 +24,13 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName=Live Translate
 SetupIconFile=LiveTranslate.ico
 UninstallDisplayIcon={app}\LiveTranslate.ico
+#ifdef SignedUninstallerDir
+; Release builds (see build.yml): the uninstaller is signed first, and Inno Setup reuses that
+; signature for the copy of itself Setup runs from the temp folder. Signing only the finished
+; installer leaves that copy unsigned, and Smart App Control then blocks Setup (error 4551).
+SignedUninstaller=yes
+SignedUninstallerDir={#SignedUninstallerDir}
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

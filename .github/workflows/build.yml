@@ -9,6 +9,14 @@ on:
 
 permissions:
   contents: write
+  actions: read # the SignPath action reads this run's artifacts
+
+env:
+  # Releases (v* tags) are code-signed through SignPath; other builds stay unsigned.
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+  SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+  SIGNPATH_PROJECT: live-translate
+  SIGNPATH_POLICY: release-signing
 
 jobs:
   windows:
@@ -28,19 +36,108 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      - name: Build installer
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer (unsigned)
+        if: env.RELEASE != 'true'
         shell: pwsh
         run: ./packaging/windows/build.ps1
+
+      # --- Signed release: the uninstaller first (Setup's temp copy of itself uses its signature),
+      # then the installer that contains it. See packaging/windows/signpath/README.md.
+
+      - name: Build uninstaller to sign
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          ./packaging/windows/build.ps1 -SignedUninstallerDir signing/uninstaller -UninstallerOnly
+          # SignPath signs .exe files; renamed back after signing.
+          New-Item -ItemType Directory -Force signing/unsigned | Out-Null
+          Get-ChildItem signing/uninstaller -Filter uninst-*.e32 |
+            ForEach-Object { Move-Item $_.FullName "signing/unsigned/$($_.BaseName).exe" }
+
+      - name: Upload uninstaller to sign
+        if: env.RELEASE == 'true'
+        id: upload-uninstaller
+        uses: actions/upload-artifact@v4
+        with:
+          name: uninstaller-unsigned
+          path: signing/unsigned/*.exe
+
+      - name: Sign uninstaller
+        if: env.RELEASE == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT }}
+          signing-policy-slug: ${{ env.SIGNPATH_POLICY }}
+          artifact-configuration-slug: uninstaller
+          github-artifact-id: ${{ steps.upload-uninstaller.outputs.artifact-id }}
+          parameters: |
+            version: "${{ steps.version.outputs.version }}"
+          wait-for-completion: true
+          # Room for approving the request by hand.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signing/signed
+
+      - name: Build installer with the signed uninstaller
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem signing/signed -Filter uninst-*.exe |
+            ForEach-Object { Move-Item -Force $_.FullName "signing/uninstaller/$($_.BaseName).e32" }
+          ./packaging/windows/build.ps1 -SignedUninstallerDir signing/uninstaller
+
+      - name: Upload installer to sign
+        if: env.RELEASE == 'true'
+        id: upload-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-unsigned
+          path: packaging/windows/Output/*.exe
+
+      - name: Sign installer
+        if: env.RELEASE == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT }}
+          signing-policy-slug: ${{ env.SIGNPATH_POLICY }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          parameters: |
+            version: "${{ steps.version.outputs.version }}"
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: packaging/windows/Signed
+
+      - name: Check signatures
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem packaging/windows/Signed -Filter *.exe) + @(Get-ChildItem signing/uninstaller -Filter *.e32)
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($sig.Status) - $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { throw "$($f.Name) is not validly signed" }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
           name: LiveTranslate-Setup
-          path: packaging/windows/Output/*.exe
+          path: ${{ env.RELEASE == 'true' && 'packaging/windows/Signed/*.exe' || 'packaging/windows/Output/*.exe' }}
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: packaging/windows/Output/*.exe
+          files: packaging/windows/Signed/*.exe
           # Shown behind "What's new" when the app offers the update.
           generate_release_notes: true

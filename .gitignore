@@ -8,3 +8,5 @@ build/
 packaging/windows/Output/
 packaging/windows/bin/
 Microsoft/
+packaging/windows/Signed/
+signing/
