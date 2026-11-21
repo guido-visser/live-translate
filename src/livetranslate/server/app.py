@@ -34,7 +34,7 @@ from ..tunnel import Tunnel
 from ..updater import Updater, install_dir, start_data_move
 from .files import WebFiles
 from .hub import Connection, Hub
-from .network import GpuStats, lan_addresses, listener_url, qr_svg
+from .network import GpuStats, host_url, lan_addresses, lan_networks, listener_url, qr_svg, subnet
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +140,40 @@ class Services:
         if s.remote.enabled and s.remote.public_url.strip():
             return s.remote.public_url.strip().rstrip("/") + "/"
         return listener_url(s.public_host, s.port)
+
+    def listener_urls(self) -> list[dict]:
+        """Every address listeners can use, one tab each with the QR code: the internet address,
+        a typed-in address, and one per network of this PC. The first is listener_url().
+
+        A network's tab is named after its Wi-Fi: the name typed in for it, or the SSID when this PC
+        is on that Wi-Fi itself; otherwise after the adapter ("Ethernet 2"). "key" is what a typed-in
+        Wi-Fi name is saved under; "wifi" is the name shown under the code."""
+        s = self.settings
+        urls: list[dict] = []
+        if s.remote.enabled and s.remote.public_url.strip():
+            urls.append({"name": "Internet", "detail": "", "url": self.listener_url(), "key": "", "wifi": ""})
+        networks = lan_networks()
+        host = s.public_host.strip()
+        if host and host not in {n["ip"] for n in networks}:
+            urls.append({"name": host, "detail": "", "url": host_url(host, s.port), "key": "", "wifi": ""})
+        for n in networks:
+            key = subnet(n["ip"])
+            wifi = s.wifi_names.get(key, "").strip() or n["ssid"]
+            adapter = " · ".join(x for x in (n["name"], n["ip"]) if x)
+            urls.append({
+                "name": wifi or n["name"] or n["ip"],
+                "detail": adapter if wifi else (n["ip"] if n["name"] else ""),
+                "url": host_url(n["ip"], s.port),
+                "key": key,
+                "wifi": wifi,
+            })
+        default = self.listener_url()
+        urls.sort(key=lambda u: u["url"] != default)  # stable: only moves the default to the front
+        if not urls or urls[0]["url"] != default:
+            urls.insert(0, {"name": default, "detail": "", "url": default, "key": "", "wifi": ""})
+        if not urls[0]["wifi"]:
+            urls[0]["wifi"] = s.wifi_name.strip()  # the one Wi-Fi name from before there were tabs
+        return urls
 
     def listener_languages(self) -> list[dict]:
         source = self.settings.source_language
@@ -291,10 +325,33 @@ def create_app(
             "languages": services.listener_languages(),
         }
 
+    @app.get("/api/qr/addresses")
+    async def qr_addresses():
+        """The tabs with the QR code (not reachable over the tunnel: it lists this PC's addresses)."""
+        return {"addresses": await asyncio.to_thread(services.listener_urls)}
+
+    @app.post("/api/admin/wifi-name")
+    async def set_wifi_name(request: Request):
+        """The Wi-Fi name of one network (by its "key" from /api/qr/addresses); empty forgets it."""
+        require_admin(request)
+        body = await request.json()
+        key, name = str(body.get("key", "")).strip(), str(body.get("name", "")).strip()[:64]
+        if not key:
+            raise HTTPException(400, "No network")
+        names = {k: v for k, v in services.settings.wifi_names.items() if k != key}
+        if name:
+            names[key] = name
+        services.store.save(services.settings.model_copy(update={"wifi_names": names}))
+        return {"addresses": await asyncio.to_thread(services.listener_urls)}
+
     @app.get("/api/qr.svg")
-    async def qr():
-        s = services.settings
-        svg = qr_svg(services.listener_url())
+    async def qr(url: str = ""):
+        # Only addresses of this app, so the QR page can't be made to point anywhere else.
+        if not url or url == services.listener_url():
+            url = services.listener_url()
+        elif url not in {u["url"] for u in await asyncio.to_thread(services.listener_urls)}:
+            raise HTTPException(404, "Unknown address")
+        svg = qr_svg(url)
         return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache"})
 
     @app.get("/audio/{lang}.mp3")
@@ -425,6 +482,7 @@ def create_app(
         # These have their own switch and slider; a page's older copy must not undo them.
         new.skip_singing, new.song_level = old.skip_singing, old.song_level
         new.song_model = old.song_model  # so does training, and a page mustn't undo that either
+        new.wifi_names = old.wifi_names  # typed in with the QR code
         services.store.save(new)
         if new.start_with_windows != old.start_with_windows:
             autostart.apply(new.start_with_windows)

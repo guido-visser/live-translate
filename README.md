@@ -78,6 +78,8 @@ Show this QR code on a screen, or print it:
 
 ![The QR code screen](docs/images/qr-code.png)
 
+Is the PC connected to more than one network, for example the church network and a separate Wi-Fi router just for listeners? Then there is a tab for each network above the code. Pick the network your listeners connect to; the app remembers your choice.
+
 Listeners then:
 
 1. **Connect to the Wi-Fi** shown under the code.

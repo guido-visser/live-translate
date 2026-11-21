@@ -19,22 +19,58 @@
     .langs { font-size: 2.6vmin; color: #444; }
     .url { font: 600 3vmin ui-monospace, Consolas, monospace; }
     .wifi { font-size: 3vmin; }
+    /* Small, so the page still looks clean on a screen in the hall; gone when printed. */
+    .nets { position: fixed; top: 8px; left: 0; right: 0; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+    .nets button {
+      font: 13px system-ui, sans-serif; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+      border: 1px solid #ccc; background: #fff; color: #555;
+    }
+    .nets button.active { border-color: #2a6df4; color: #2a6df4; font-weight: 600; }
+    @media print { .nets { display: none; } }
   </style>
 </head>
 <body>
+  <nav class="nets" id="nets" hidden></nav>
   <main>
     <h1 id="heading">🌐 Live Translate</h1>
-    <img id="qr" src="/api/qr.svg" alt="QR code">
+    <img id="qr" alt="QR code">
     <div class="url" id="url"></div>
     <div class="wifi" id="wifi"></div>
     <div class="langs" id="langs"></div>
   </main>
   <script>
+    const $ = (id) => document.getElementById(id);
+    let addresses = [];
+    function show(url) {
+      try { localStorage.setItem("lt.qr.url", url); } catch { /* ignore */ }
+      $("qr").src = `/api/qr.svg?url=${encodeURIComponent(url)}`;
+      $("url").textContent = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      const wifi = (addresses.find((a) => a.url === url) || {}).wifi;
+      $("wifi").textContent = wifi ? `📶 Wi-Fi: ${wifi}` : "";
+      $("nets").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.url === url));
+    }
+    // One button per network of this PC; the address picked in the operator page comes along in ?url=.
+    fetch("/api/qr/addresses").then((r) => r.json()).then((info) => {
+      addresses = info.addresses;
+      let saved = new URLSearchParams(location.search).get("url") || "";
+      try { saved = saved || localStorage.getItem("lt.qr.url") || ""; } catch { /* ignore */ }
+      for (const a of addresses) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.url = a.url;
+        b.textContent = a.name;
+        b.title = a.detail;
+        b.addEventListener("click", () => show(a.url));
+        $("nets").appendChild(b);
+      }
+      $("nets").hidden = addresses.length < 2;
+      show(addresses.some((a) => a.url === saved) ? saved : addresses[0].url);
+    }).catch(() => { $("qr").src = "/api/qr.svg"; });
     fetch("/api/public").then((r) => r.json()).then((info) => {
       // The languages below are each written in their own language, so everyone can see theirs.
       if (info.church) document.getElementById("heading").textContent = `🌐 ${info.church}`;
-      document.getElementById("url").textContent = info.url.replace(/^https?:\/\//, "").replace(/\/$/, "");
-      document.getElementById("wifi").textContent = info.wifi ? `📶 Wi-Fi: ${info.wifi}` : "";
+      if (!$("url").textContent) $("url").textContent = info.url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      if (!addresses.length) $("wifi").textContent = info.wifi ? `📶 Wi-Fi: ${info.wifi}` : "";
       document.getElementById("langs").textContent = info.languages.map((l) => l.name).join(" · ");
     });
   </script>

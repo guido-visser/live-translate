@@ -308,16 +308,80 @@
 
   // -- QR dialog -------------------------------------------------------------------
 
-  $("qrBtn").addEventListener("click", () => {
-    $("qrImg").src = withPin(`/api/qr.svg?t=${Date.now()}`);
-    $("url").textContent = state?.url || "";
-    $("url").href = state?.url || "#";
-    const wifi = state?.settings.wifi_name;
-    $("wifiLine").textContent = wifi ? `Wi-Fi: ${wifi}` : "";
+  // One tab per network of this PC (e.g. the church Wi-Fi and a separate router just for
+  // listeners); the chosen one is remembered, also for the full-screen page.
+  let qrUrl = "";
+  let qrAddresses = [];
+  function showQr(url) {
+    qrUrl = url;
+    const a = qrAddresses.find((x) => x.url === url) || {};
+    $("wifiText").textContent = a.wifi ? `Wi-Fi: ${a.wifi}` : "";
+    // A network's Wi-Fi name is typed in here: the PC can't see the name of a router it is cabled to.
+    $("wifiEdit").hidden = !a.key;
+    $("wifiEdit").textContent = a.wifi ? t("wifiChange") : t("wifiAdd");
+    $("wifiEdit").title = t("wifiNameHelp");
+    $("wifiForm").hidden = true;
+    $("wifiLine").hidden = false;
+    try { localStorage.setItem("lt.qr.url", url); } catch { /* ignore */ }
+    $("qrImg").src = withPin(`/api/qr.svg?url=${encodeURIComponent(url)}&t=${Date.now()}`);
+    $("url").textContent = url;
+    $("url").href = url;
+    $("qrTabs").querySelectorAll("button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.url === url);
+      b.setAttribute("aria-selected", String(b.dataset.url === url));
+    });
+  }
+  function renderQrTabs(addresses) {
+    qrAddresses = addresses;
+    const tabs = $("qrTabs");
+    tabs.textContent = "";
+    for (const a of addresses) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.dataset.url = a.url;
+      b.textContent = a.name;
+      if (a.detail) b.append(Object.assign(document.createElement("small"), { textContent: a.detail }));
+      b.addEventListener("click", () => showQr(a.url));
+      tabs.appendChild(b);
+    }
+    tabs.hidden = addresses.length < 2;
+  }
+  $("qrBtn").addEventListener("click", async () => {
+    let addresses = [];
+    try { addresses = (await api("/api/qr/addresses")).addresses; } catch { /* only the default below */ }
+    if (!addresses.length) {
+      const wifi = state?.settings.wifi_name || "";
+      addresses = [{ name: state?.url || "", detail: "", url: state?.url || "", key: "", wifi }];
+    }
+    renderQrTabs(addresses);
+    let saved = "";
+    try { saved = localStorage.getItem("lt.qr.url") || ""; } catch { /* ignore */ }
+    showQr(addresses.some((a) => a.url === saved) ? saved : addresses[0].url);
     $("qrDialog").showModal();
   });
+  $("wifiEdit").addEventListener("click", () => {
+    $("wifiInput").value = qrAddresses.find((x) => x.url === qrUrl)?.wifi || "";
+    $("wifiLine").hidden = true;
+    $("wifiForm").hidden = false;
+    $("wifiInput").focus();
+  });
+  $("wifiForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const key = qrAddresses.find((x) => x.url === qrUrl)?.key;
+    try {
+      const { addresses } = await api("/api/admin/wifi-name", {
+        method: "POST", body: JSON.stringify({ key, name: $("wifiInput").value }),
+      });
+      renderQrTabs(addresses);
+    } catch (err) {
+      alert(t("notSaved").replace("{error}", err.message));
+    }
+    showQr(qrUrl);
+  });
   $("qrClose").addEventListener("click", () => $("qrDialog").close());
-  $("qrFull").addEventListener("click", () => window.open("/qr", "qr", "width=900,height=900"));
+  $("qrFull").addEventListener("click", () =>
+    window.open(`/qr?url=${encodeURIComponent(qrUrl)}`, "qr", "width=900,height=900"));
   $("qrDialog").addEventListener("click", (e) => { if (e.target === $("qrDialog")) $("qrDialog").close(); });
 
   // -- transcript, listeners, stats, level -------------------------------------------

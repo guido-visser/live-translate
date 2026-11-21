@@ -1,7 +1,7 @@
 window.ADMIN_I18N = {
   nl: {
     settings: "Instellingen", back: "Terug", saved: "Opgeslagen ✓", notSaved: "Niet opgeslagen: {error}", close: "Sluiten",
-    qr: "QR-code", qrTitle: "Live vertaling", fullscreen: "Volledig scherm",
+    qr: "QR-code", qrTitle: "Live vertaling", fullscreen: "Volledig scherm", wifiAdd: "Wifi-naam toevoegen", wifiChange: "Wijzigen", wifiNameHelp: "De naam van het wifi-netwerk waarmee luisteraars verbinden voor dit adres.",
     start: "Start vertaling", stop: "Stop vertaling", pause: "Pauze", resume: "Hervatten",
     stopped: "Gestopt", loading: "Model laden…", running: "Bezig", paused: "Gepauzeerd",
     trReady: "klaar", trStarting: "starten…", trInstalling: "installeren…", trError: "fout", trStopped: "gestopt",
@@ -162,7 +162,7 @@ window.ADMIN_I18N = {
   },
   en: {
     settings: "Settings", back: "Back", saved: "Saved ✓", notSaved: "Not saved: {error}", close: "Close",
-    qr: "QR code", qrTitle: "Live translation", fullscreen: "Full screen",
+    qr: "QR code", qrTitle: "Live translation", fullscreen: "Full screen", wifiAdd: "Add Wi-Fi name", wifiChange: "Change", wifiNameHelp: "The name of the Wi-Fi network listeners connect to for this address.",
     start: "Start translating", stop: "Stop translating", pause: "Pause", resume: "Resume",
     stopped: "Stopped", loading: "Loading model…", running: "Running", paused: "Paused",
     trReady: "ready", trStarting: "starting…", trInstalling: "installing…", trError: "error", trStopped: "stopped",
@@ -323,7 +323,7 @@ window.ADMIN_I18N = {
   },
   ru: {
     settings: "Настройки", back: "Назад", saved: "Сохранено ✓", notSaved: "Не сохранено: {error}", close: "Закрыть",
-    qr: "QR-код", qrTitle: "Синхронный перевод", fullscreen: "На весь экран",
+    qr: "QR-код", qrTitle: "Синхронный перевод", fullscreen: "На весь экран", wifiAdd: "Указать сеть Wi-Fi", wifiChange: "Изменить", wifiNameHelp: "Название сети Wi-Fi, к которой подключаются слушатели для этого адреса.",
     start: "Начать перевод", stop: "Остановить перевод", pause: "Пауза", resume: "Продолжить",
     stopped: "Остановлено", loading: "Загрузка модели…", running: "Работает", paused: "Пауза",
     trReady: "готов", trStarting: "запуск…", trInstalling: "установка…", trError: "ошибка", trStopped: "остановлен",
@@ -484,7 +484,7 @@ window.ADMIN_I18N = {
   },
   uk: {
     settings: "Налаштування", back: "Назад", saved: "Збережено ✓", notSaved: "Не збережено: {error}", close: "Закрити",
-    qr: "QR-код", qrTitle: "Синхронний переклад", fullscreen: "На весь екран",
+    qr: "QR-код", qrTitle: "Синхронний переклад", fullscreen: "На весь екран", wifiAdd: "Вказати мережу Wi-Fi", wifiChange: "Змінити", wifiNameHelp: "Назва мережі Wi-Fi, до якої підключаються слухачі для цієї адреси.",
     start: "Почати переклад", stop: "Зупинити переклад", pause: "Пауза", resume: "Продовжити",
     stopped: "Зупинено", loading: "Завантаження моделі…", running: "Працює", paused: "Пауза",
     trReady: "готовий", trStarting: "запуск…", trInstalling: "встановлення…", trError: "помилка", trStopped: "зупинено",

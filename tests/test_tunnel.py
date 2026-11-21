@@ -32,7 +32,7 @@ def test_over_the_tunnel_only_the_listener_page_is_served(tmp_path):
         assert c.get("/").status_code == 200
         assert c.get("/static/client/app.js").status_code == 200
         assert c.get("/api/public").json()["url"] == "https://vertaling.example.nl/"
-        for path in ("/admin", "/admin/settings", "/api/admin/state", "/qr", "/static/admin/settings.js"):
+        for path in ("/admin", "/admin/settings", "/api/admin/state", "/qr", "/api/qr/addresses", "/static/admin/settings.js"):
             assert c.get(path).status_code == 403, path
         assert c.post("/api/admin/start").status_code == 403
         with pytest.raises(Exception):

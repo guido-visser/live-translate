@@ -141,6 +141,70 @@ def test_qr_code_and_pages(client):
     assert client.get("/audio/ru.mp3").status_code == 404  # TTS disabled in this fixture
 
 
+def test_qr_code_for_each_network(client, monkeypatch):
+    import livetranslate.server.app as app_module
+
+    nets = [{"name": "Ethernet", "ip": "192.168.178.2", "ssid": ""}, {"name": "Ethernet 2", "ip": "192.168.10.5", "ssid": ""}]
+    monkeypatch.setattr(app_module, "lan_networks", lambda: nets)
+    monkeypatch.setattr(app_module, "listener_url", lambda host, port: f"http://192.168.178.2:{port}/")
+    addresses = client.get("/api/qr/addresses").json()["addresses"]
+    port = client.get("/api/admin/state").json()["settings"]["port"]
+    assert [(a["name"], a["detail"], a["url"]) for a in addresses] == [
+        ("Ethernet", "192.168.178.2", f"http://192.168.178.2:{port}/"),
+        ("Ethernet 2", "192.168.10.5", f"http://192.168.10.5:{port}/"),
+    ]
+    assert client.get("/api/qr.svg", params={"url": addresses[1]["url"]}).text.startswith("<svg")
+    assert client.get("/api/qr.svg", params={"url": "https://example.com/"}).status_code == 404
+
+    # The Wi-Fi name typed in for the router network names its tab and shows under its code.
+    addresses = client.post("/api/admin/wifi-name", json={"key": addresses[1]["key"], "name": "Kerk-Vertaling"}).json()["addresses"]
+    assert (addresses[1]["name"], addresses[1]["detail"], addresses[1]["wifi"]) == ("Kerk-Vertaling", "Ethernet 2 · 192.168.10.5", "Kerk-Vertaling")
+    settings = client.get("/api/admin/state").json()["settings"]
+    assert settings["wifi_names"] == {"192.168.10": "Kerk-Vertaling"}
+    settings["wifi_names"] = {}  # a settings page with an older copy doesn't undo it
+    client.post("/api/admin/settings", json=settings)
+    assert client.get("/api/qr/addresses").json()["addresses"][1]["wifi"] == "Kerk-Vertaling"
+    addresses = client.post("/api/admin/wifi-name", json={"key": "192.168.10", "name": ""}).json()["addresses"]
+    assert addresses[1]["name"] == "Ethernet 2"
+
+
+def test_lan_networks_puts_the_default_route_first(monkeypatch):
+    from livetranslate.server import network
+
+    monkeypatch.setattr(network, "lan_addresses", lambda: ["192.168.178.2", "192.168.10.5"])
+    monkeypatch.setattr(network.sys, "platform", "win32")
+    monkeypatch.setattr(network, "_windows_networks", lambda: [("Ethernet 2", "192.168.10.5", 6), ("WiFi", "192.168.178.2", 71), ("Wi-Fi 2", "169.254.1.1", 71)])
+    monkeypatch.setattr(network, "_wifi_ssids", lambda: {"WiFi": "Kerk"})
+    assert network.lan_networks() == [
+        {"name": "WiFi", "ip": "192.168.178.2", "ssid": "Kerk"},
+        {"name": "Ethernet 2", "ip": "192.168.10.5", "ssid": ""},
+    ]
+    monkeypatch.setattr(network, "_windows_networks", lambda: (_ for _ in ()).throw(OSError()))
+    assert network.lan_networks() == [{"name": "", "ip": "192.168.178.2", "ssid": ""}, {"name": "", "ip": "192.168.10.5", "ssid": ""}]
+
+
+def test_wifi_names_from_netsh(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    from livetranslate.server import network
+
+    out = (
+        "\nEr is 1 interface op het systeem:\n\n"
+        "    Naam                   : WiFi\n"
+        "    Beschrijving           : Intel(R) Wi-Fi 6 AX200\n"
+        "    Status                 : verbonden\n"
+        "    SSID                   : Kerk: gasten\n"
+        "    BSSID                  : aa:bb:cc:dd:ee:ff\n\n"
+        "    Naam                   : Wi-Fi 2\n"
+        "    Status                 : niet verbonden\n"
+    )
+    monkeypatch.setattr(network, "_ssid_cache", (0.0, {}))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=out))
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+    assert network._wifi_ssids() == {"WiFi": "Kerk: gasten"}
+
+
 def test_testimony_in_russian_goes_to_phones_and_vmix(client):
     from tests.test_vmix import FakeVmix
 

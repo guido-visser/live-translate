@@ -128,9 +128,18 @@
 
   <dialog id="qrDialog" class="qr-dialog">
     <h2 data-t="qrTitle"></h2>
+    <div id="qrTabs" class="subtabs qr-tabs" role="tablist" hidden></div>
     <img id="qrImg" alt="QR code" width="320" height="320">
     <p><a id="url" class="mono" target="_blank" rel="noopener"></a></p>
-    <p id="wifiLine" class="muted"></p>
+    <p id="wifiLine" class="muted qr-wifi">
+      <span id="wifiText"></span>
+      <button id="wifiEdit" class="link-btn" type="button"></button>
+    </p>
+    <form id="wifiForm" class="qr-wifi-form" hidden>
+      <input id="wifiInput" type="text" maxlength="64" data-t-placeholder="wifi" aria-describedby="wifiHelp">
+      <button class="primary" type="submit">OK</button>
+      <small id="wifiHelp" class="muted" data-t="wifiNameHelp"></small>
+    </form>
     <div class="dialog-buttons">
       <button id="qrFull" type="button" data-t="fullscreen"></button>
       <button id="qrClose" class="primary" type="button" data-t="close"></button>

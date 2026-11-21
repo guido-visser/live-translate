@@ -207,6 +207,9 @@ class Settings(BaseModel):
     # Override for the address in the QR code (e.g. when the PC has several networks).
     public_host: str = ""
     wifi_name: str = ""
+    # The Wi-Fi name per network of this PC, by subnet ("192.168.10": "Church-Translation"): typed in
+    # with the QR code, since the PC can't see the name of a router it is cabled to.
+    wifi_names: dict[str, str] = Field(default_factory=dict)
     # When set, the admin page may also be opened from other devices with this PIN.
     admin_pin: str = ""
     # When set, use this LibreTranslate instead of starting one ourselves.
