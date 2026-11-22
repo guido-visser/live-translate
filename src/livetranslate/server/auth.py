@@ -27,6 +27,8 @@ SESSION_S = SESSION_DAYS * 24 * 3600
 COOKIE = "lt_admin"
 # last_seen is saved at most this often per session: a page polls the state all the time.
 TOUCH_SAVE_S = 300
+# More signed-in devices than a church has tablets: the oldest is signed out first.
+MAX_SESSIONS = 50
 
 _N, _R, _P = 2**14, 8, 1
 
@@ -65,7 +67,11 @@ def _token_hash(token: str) -> str:
 
 
 class SessionStore:
-    """The signed-in devices; a session lasts SESSION_DAYS after it was last used."""
+    """The signed-in devices; a session lasts SESSION_DAYS after it was last used.
+
+    A session only works from the address it signed in from: a cookie overheard on the
+    Wi-Fi (the page is plain HTTP) is no use from another device. A device that gets a new
+    address signs in again."""
 
     def __init__(self, path: Path, clock: Callable[[], float] = time.time):
         self.path = path
@@ -114,11 +120,17 @@ class SessionStore:
         }
         with self._lock:
             self._sessions[_token_hash(token)] = session
+            while len(self._sessions) > MAX_SESSIONS:
+                oldest = min(self._sessions, key=lambda k: self._sessions[k]["last_seen"])
+                del self._sessions[oldest]
             self._save()
         return token, session["id"]
 
-    def check(self, token: str | None, ip: str = "") -> str | None:
-        """The session id of a valid cookie (and it counts as used now), or None."""
+    def check(self, token: str | None, ip: str | None = None) -> str | None:
+        """The session id of a valid cookie (and it counts as used now), or None.
+
+        ip: the address the request comes from, which must be the one the session signed in
+        from. None skips that check (signing out, where any copy of the cookie may do it)."""
         if not token:
             return None
         key = _token_hash(token)
@@ -126,14 +138,14 @@ class SessionStore:
             session = self._sessions.get(key)
             if session is None:
                 return None
+            if ip is not None and ip[:64] != session["ip"]:
+                return None
             now = self.clock()
             if now - session["last_seen"] >= SESSION_S:
                 del self._sessions[key]
                 self._save()
                 return None
             session["last_seen"] = now
-            if ip:
-                session["ip"] = ip[:64]
             if now - self._saved.get(key, 0) >= TOUCH_SAVE_S:
                 self._save()
             return session["id"]
@@ -180,6 +192,13 @@ class LoginLimiter:
         while times and now - times[0] >= self.WINDOW_S:
             times.popleft()
 
+    def _forget_old(self, now: float) -> None:
+        """Devices that stopped guessing long ago, so the bookkeeping can't grow without end."""
+        for ip in [ip for ip, times in self._failures.items() if not times or now - times[-1] >= self.WINDOW_S]:
+            del self._failures[ip]
+        for ip in [ip for ip, until in self._blocked.items() if until <= now]:
+            del self._blocked[ip]
+
     def blocked_for(self, ip: str) -> int:
         """Seconds until this device may try again; 0 = it may now."""
         with self._lock:
@@ -190,6 +209,7 @@ class LoginLimiter:
     def failed(self, ip: str) -> None:
         with self._lock:
             now = self.clock()
+            self._forget_old(now)
             times = self._failures.setdefault(ip, deque())
             times.append(now)
             self._all.append(now)

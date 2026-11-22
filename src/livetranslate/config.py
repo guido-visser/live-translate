@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from platformdirs import user_config_dir, user_data_dir
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 APP_NAME = "LiveTranslate"
 LOCATION_FILE = "data-location.txt"
@@ -49,6 +49,18 @@ def keep_downloads_in_data_dir() -> None:
             os.environ[name] = str(location / folder)
 
 
+# The speech models offered; another value could make the app load a model from anywhere.
+WHISPER_MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
+
+
+def is_network_path(path: str) -> bool:
+    """A file on another computer (\\\\server\\share, //server/share, \\\\?\\UNC\\…). Opening one
+    makes Windows sign in to that computer with this user's login (its password hash goes
+    along), so a typed-in path must never be one."""
+    text = path.strip().strip('"').replace("/", "\\")
+    return text.startswith("\\\\")
+
+
 def config_path() -> Path:
     path = Path(user_config_dir(APP_NAME, appauthor=False))
     path.mkdir(parents=True, exist_ok=True)
@@ -60,21 +72,31 @@ class AudioSettings(BaseModel):
     # Stable device id ("<host api>::<name>"); None means the system default input.
     device: str | None = None
     # 0 = mix all channels to mono, otherwise the 1-based channel to use.
-    channel: int = 0
-    file_path: str = ""
-    gain: float = 1.0
+    channel: int = Field(0, ge=0, le=64)
+    file_path: str = Field("", max_length=1000)
+    gain: float = Field(1.0, ge=0.0, le=8.0)
 
 
 class AsrSettings(BaseModel):
     model: str = "large-v3-turbo"
     device: Literal["auto", "cuda", "cpu"] = "auto"
-    beam_size: int = 1
+    beam_size: int = Field(1, ge=1, le=10)
     # Seconds of new audio to collect before re-running recognition.
-    min_chunk_s: float = 1.0
+    min_chunk_s: float = Field(1.0, ge=0.2, le=10.0)
     # Silence after speech that finalizes the current sentence.
-    silence_commit_s: float = 0.6
+    silence_commit_s: float = Field(0.6, ge=0.1, le=5.0)
     # Force a sentence out after this long without punctuation or a pause.
-    max_sentence_s: float = 8.0
+    max_sentence_s: float = Field(8.0, ge=1.0, le=60.0)
+
+    @field_validator("model")
+    @classmethod
+    def _known_model(cls, value: str) -> str:
+        # Whisper also takes a folder or any Hugging Face name; only the offered models are allowed.
+        # Not an error: a settings file that doesn't validate would lose every other setting too.
+        if value not in WHISPER_MODELS:
+            log.warning("Unknown speech model %r; using %s", value, WHISPER_MODELS[0])
+            return WHISPER_MODELS[0]
+        return value
 
 
 class TranslationSettings(BaseModel):

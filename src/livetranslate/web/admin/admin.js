@@ -439,7 +439,14 @@
       ["statLatency", stats.latency_s ? `${stats.latency_s} s` : "–"],
     ];
     if (gpu) rows.push(["statGpu", `${gpu.util}% · ${gpu.mem_used_mb} / ${gpu.mem_total_mb} MB`]);
-    $("stats").innerHTML = rows.map(([k, v]) => `<dt>${t(k)}</dt><dd class="mono">${v}</dd>`).join("");
+    const list = $("stats");
+    list.textContent = "";
+    for (const [k, v] of rows) {
+      list.appendChild(document.createElement("dt")).textContent = t(k);
+      const dd = list.appendChild(document.createElement("dd"));
+      dd.className = "mono";
+      dd.textContent = v;
+    }
   }
 
   function renderLevel(db) {

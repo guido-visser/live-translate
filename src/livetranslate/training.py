@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
-from .config import SongModel
+from .config import SongModel, is_network_path
 from .gpuhelper import SoundClient
 from .stt.sound import ON_AFTER, SONG_LEVELS, TRAINED_LIMIT, SingingGate, SoundScores, song_chance
 
@@ -480,11 +480,14 @@ class Trainer:
     def _sample_file(self, source_id: str) -> Path:
         return self.folder / f"{source_id}.npz"
 
-    def add(self, text: str) -> dict:
-        """Lines with links or file paths. Channels and playlists come back, to choose from."""
+    def add(self, text: str, allow_files: bool = True) -> dict:
+        """Lines with links or file paths. Channels and playlists come back, to choose from.
+
+        allow_files: False for another device, which mustn't make this PC open its files (or find
+        out which exist). Files on a network share are never opened: see is_network_path."""
         added, channels, rejected = 0, [], []
-        for line in text.splitlines():
-            line = line.strip().strip('"')
+        for line in text.splitlines()[:500]:
+            line = line.strip().strip('"')[:2000]
             if not line:
                 continue
             if is_youtube(line):
@@ -493,7 +496,7 @@ class Trainer:
                     added += self._add({"id": f"yt-{video}", "kind": "youtube", "source": f"https://www.youtube.com/watch?v={video}", "title": line})
                 else:
                     channels.append(line)
-            elif Path(line).is_file():
+            elif allow_files and not is_network_path(line) and Path(line).is_file():
                 added += self._add_file(line)
             else:
                 rejected.append(line)
@@ -523,6 +526,9 @@ class Trainer:
     def remove(self, source_id: str) -> None:
         with self._lock:
             if self.current == source_id:  # being read right now: the Stop button is for that
+                return
+            # Only an id from the list names a file: the id comes from the request.
+            if not any(s["id"] == source_id for s in self.sources):
                 return
             self.sources = [s for s in self.sources if s["id"] != source_id]
         self._sample_file(source_id).unlink(missing_ok=True)

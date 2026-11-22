@@ -170,6 +170,12 @@ def make_server(app, port: int):
             log_config=None,
             log_level="warning",
             ws_ping_interval=20,
+            # Phones and pages send only short messages; a big one is refused instead of buffered.
+            ws_max_size=64 * 1024,
+            # Requests come straight from phones and this PC, never through a proxy that could be
+            # trusted: X-Forwarded-For must not change who a request seems to come from.
+            proxy_headers=False,
+            server_header=False,
             timeout_graceful_shutdown=SHUTDOWN_WAIT_S,
         )
     )

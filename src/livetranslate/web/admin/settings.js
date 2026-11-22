@@ -582,6 +582,9 @@
     $("obsHost").value = s.obs.host;
     $("obsPort").value = s.obs.port;
     $("obsPassword").value = s.obs.password;
+    // Another device doesn't get the password and can't change it (it stays as it is on the PC).
+    $("obsPassword").disabled = state.access === "remote";
+    $("obsPassword").placeholder = state.access === "remote" ? t("hiddenOnPc") : "";
     $("obsSource").value = s.obs.source;
     $("obsScene").value = s.obs.scene;
     renderObsLists();
@@ -1289,6 +1292,7 @@
       webPanel.querySelectorAll("input, button").forEach((el) => (el.disabled = true));
       $("wsLan").checked = state.settings.web_server.lan_admin;
       $("wsLanNeedsPassword").hidden = true;
+      $("wsTunnelNote").hidden = true;
       $("wsPort").value = state.settings.port;
       $("wsAddresses").hidden = $("wsFixFirewall").hidden = $("wsRestartBox").hidden = true;
       $("wsFirewall").textContent = "";
@@ -1298,6 +1302,7 @@
     $("wsLan").checked = web.lan_admin;
     $("wsLan").disabled = !web.password_set && !web.lan_admin;
     $("wsLanNeedsPassword").hidden = web.password_set;
+    $("wsTunnelNote").hidden = !web.tunnel_on;
     const pw = $("wsPasswordState");
     pw.textContent = !web.password_set ? t("wsPasswordNone")
       : web.password_short ? t("wsPasswordShort").replace("{n}", web.min_password) : t("wsPasswordSet");

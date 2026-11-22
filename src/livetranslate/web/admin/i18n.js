@@ -1,5 +1,7 @@
 window.ADMIN_I18N = {
   nl: {
+    wsTunnelNote: "Uitgeschakeld zolang Luisteren via internet aan staat (tabblad Netwerk): het beheerscherm werkt dan alleen op deze pc.",
+    hiddenOnPc: "Verborgen; alleen op de pc te wijzigen",
     // Settings → Web Server, the login page for other devices
     tabWebServer: "Webserver",
     signOut: "Afmelden",
@@ -216,6 +218,8 @@ window.ADMIN_I18N = {
     createKey: "Sleutel maken", copy: "Kopiëren", copied: "Gekopieerd",
   },
   en: {
+    wsTunnelNote: "Switched off while Listening over the internet is on (Network tab): the admin page then only works on this PC.",
+    hiddenOnPc: "Hidden; can only be changed on the PC",
     // Settings → Web Server, the login page for other devices
     tabWebServer: "Web server",
     signOut: "Sign out",
@@ -432,6 +436,8 @@ window.ADMIN_I18N = {
     createKey: "Create key", copy: "Copy", copied: "Copied",
   },
   ru: {
+    wsTunnelNote: "Отключено, пока включено прослушивание через интернет (вкладка «Сеть»): страница управления тогда работает только на этом компьютере.",
+    hiddenOnPc: "Скрыто; изменить можно только на компьютере",
     // Settings → Web Server, the login page for other devices
     tabWebServer: "Веб-сервер",
     signOut: "Выйти",
@@ -648,6 +654,8 @@ window.ADMIN_I18N = {
     createKey: "Создать ключ", copy: "Копировать", copied: "Скопировано",
   },
   uk: {
+    wsTunnelNote: "Вимкнено, поки ввімкнено прослуховування через інтернет (вкладка «Мережа»): сторінка керування тоді працює лише на цьому комп’ютері.",
+    hiddenOnPc: "Приховано; змінити можна лише на комп’ютері",
     // Settings → Web Server, the login page for other devices
     tabWebServer: "Вебсервер",
     signOut: "Вийти",

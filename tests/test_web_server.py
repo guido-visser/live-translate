@@ -25,6 +25,7 @@ def local(tmp_path, monkeypatch):
     services = app.state.services
     services.login_delay_s = 0
     services.admin_urls = lambda: [{"name": "Church", "detail": "", "url": ADMIN_URL}]
+    services.own_names = lambda: {"192.168.1.10", "church-pc"}
     with TestClient(app) as client:
         client.services = services
         yield client
@@ -182,7 +183,7 @@ def test_an_open_admin_page_is_disconnected_when_signed_out(local):
     allow_remote(local)
     tablet = signed_in(local)
     # A browser sends the cookie with the websocket too; the test client needs to be told.
-    cookie = {"cookie": f"{COOKIE}={tablet.cookies[COOKIE]}"}
+    cookie = {"cookie": f"{COOKIE}={tablet.cookies[COOKIE]}", "host": "192.168.1.10:8000"}
     with tablet.websocket_connect("/ws/admin", headers=cookie) as ws:
         local.post("/api/admin/webserver/sessions/revoke-all")
         with pytest.raises(WebSocketDisconnect) as closed:
@@ -202,7 +203,8 @@ def test_an_old_pin_link_gives_no_access(local):
 
 def test_the_login_page_only_returns_to_admin_pages():
     assert _safe_next("/admin/settings#webserver") == "/admin/settings#webserver"
-    for target in (None, "", "https://evil.example", "//evil.example", "/admin//evil", "/admin\\evil", "/admin/login", "/qr"):
+    assert _safe_next("/qr") == "/qr"
+    for target in (None, "", "https://evil.example", "//evil.example", "/admin//evil", "/admin\\evil", "/admin/login", "/qrx", "/"):
         assert _safe_next(target) == "/admin", target
 
 

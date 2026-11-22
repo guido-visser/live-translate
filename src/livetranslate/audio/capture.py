@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import soxr
 
-from ..config import AudioSettings
+from ..config import AudioSettings, is_network_path
 from .devices import pyaudio_lock, resolve_input_device, same_device_other_apis
 
 log = logging.getLogger(__name__)
@@ -216,6 +216,8 @@ class FileSource(AudioSource):
     def start(self, callback: AudioCallback) -> None:
         import soundfile as sf
 
+        if is_network_path(str(self.path)):
+            raise FileNotFoundError("Files on a network share can't be used; copy the file to this PC.")
         if not self.path.is_file():
             raise FileNotFoundError(f"Audio file not found: {self.path}")
         self._callback = callback

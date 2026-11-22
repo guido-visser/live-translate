@@ -16,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -26,6 +27,13 @@ log = logging.getLogger(__name__)
 REPO = "guido-visser/live-translate"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 CHECK_EVERY_S = 6 * 3600
+# Where GitHub serves release files from; the installer runs with administrator rights.
+DOWNLOAD_HOSTS = {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
+
+
+def trusted_download(url: str | None) -> bool:
+    parts = urlsplit(url or "")
+    return parts.scheme == "https" and (parts.hostname or "").lower() in DOWNLOAD_HOSTS
 FIRST_CHECK_AFTER_S = 15
 
 
@@ -109,6 +117,9 @@ class Updater:
             raise RuntimeError("No update to install")
         if not self.is_idle():
             raise RuntimeError("Stop translating before updating")
+        # The installer runs as administrator: only GitHub's own file, checked against its checksum.
+        if not trusted_download(self.latest.get("download")) or not self.latest.get("sha256"):
+            raise RuntimeError("This update can't be checked; download it from the website instead")
         if self._lock.locked():
             raise RuntimeError("An update is already in progress")
         async with self._lock:
@@ -137,6 +148,8 @@ class Updater:
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
             async with client.stream("GET", info["download"], headers={"User-Agent": "LiveTranslate"}) as r:
                 r.raise_for_status()
+                if not trusted_download(str(r.url)):
+                    raise RuntimeError(f"The download was sent to an unexpected address ({r.url.host})")
                 total = int(r.headers.get("content-length") or info.get("size") or 0)
                 done = 0
                 with open(partial, "wb") as f:
@@ -146,7 +159,7 @@ class Updater:
                         done += len(chunk)
                         if total:
                             self.progress = min(done / total, 1.0)
-        if info.get("sha256") and digest.hexdigest() != info["sha256"]:
+        if digest.hexdigest() != info["sha256"]:
             partial.unlink(missing_ok=True)
             raise RuntimeError("The downloaded installer is damaged (checksum mismatch)")
         partial.replace(target)

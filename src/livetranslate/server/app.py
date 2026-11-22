@@ -10,6 +10,8 @@ import os
 import re
 import socket
 import sys
+import time
+from collections import Counter
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -26,7 +28,15 @@ from fastapi.responses import (
 
 from .. import __version__, autostart, calibration, firewall
 from ..audio.devices import list_all
-from ..config import PROFILE_FIELDS, Settings, SettingsStore, SongModel, data_dir as default_data_dir
+from ..config import (
+    PROFILE_FIELDS,
+    WHISPER_MODELS,
+    Settings,
+    SettingsStore,
+    SongModel,
+    data_dir as default_data_dir,
+    is_network_path,
+)
 from ..firstrun import Preparation
 from ..integrations.obs import ObsOutput
 from ..integrations.vmix import VmixOutput
@@ -48,9 +58,18 @@ from .network import GpuStats, host_url, lan_addresses, lan_networks, listener_u
 log = logging.getLogger(__name__)
 
 WEB = Path(__file__).resolve().parent.parent / "web"
-LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
-LOCAL_NAMES = {"127.0.0.1", "::1", "localhost", "testserver"}
-WHISPER_MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
+# A request from this PC itself: its address, and the name the browser used for it. Only names a
+# browser always resolves to this PC: a name looked up on the network could be made to point here
+# (DNS rebinding) by a website, which would then count as this PC.
+LOCAL_HOSTS = {"127.0.0.1", "::1"}
+LOCAL_NAMES = {"127.0.0.1", "::1", "localhost"}
+# Phones: a full church fits easily; one device can't use up the PC with hundreds of connections.
+MAX_LISTENERS = 200
+MAX_LISTENERS_PER_DEVICE = 10
+# Requests are small (the settings with a trained model are ~50 KB); uploads have their own route.
+MAX_BODY = 1_000_000
+OWN_NAMES_S = 30
+SAFE_LOG_NAME = re.compile(r"[\w\- ][\w.\- ]*")
 # What phones may reach through the internet tunnel: the listener page and nothing else.
 TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/sw.js", "/api/public", "/ws/listen", "/static/icon.png"}
 TUNNEL_PREFIXES = ("/static/client/", "/audio/")
@@ -59,9 +78,100 @@ TUNNEL_PREFIXES = ("/static/client/", "/audio/")
 def _safe_next(target: str | None) -> str:
     """Where the login page goes afterwards: only a page of the admin itself, never another site."""
     target = target or ""
-    if target.startswith("/admin") and not target.startswith("/admin/login") and "//" not in target and "\\" not in target:
+    ours = target.startswith("/admin") or target == "/qr" or target.startswith("/qr?")
+    if ours and not target.startswith("/admin/login") and "//" not in target and "\\" not in target:
         return target
     return "/admin"
+
+
+def _host_name(address: str) -> str:
+    try:
+        return (urlsplit(f"//{address}").hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+class LimitBody:
+    """Refuses request bodies over MAX_BODY, also when they don't say their size up front: one
+    request could otherwise fill the memory. The upload route (only on this PC) streams to disk."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] == "/api/admin/upload":
+            await self.app(scope, receive, send)
+            return
+        length = dict(scope.get("headers") or []).get(b"content-length", b"")
+        if length.isdigit() and int(length) > MAX_BODY:
+            await PlainTextResponse("Request too large.", status_code=413)(scope, receive, send)
+            return
+        received = 0
+
+        async def limited():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_BODY:
+                    raise HTTPException(413, "Request too large.")
+            return message
+
+        await self.app(scope, limited, send)
+
+
+class SecurityHeaders:
+    """What browsers need to keep pages of this app from being misused: never inside another
+    website's frame (clickjacking), only this app's own scripts (no injected ones), no guessing of
+    file types, no address of the admin page leaking to links it opens, admin data never cached."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+        host = host if re.fullmatch(r"[A-Za-z0-9.\-:\[\]]{1,255}", host) else ""
+        # 'self' covers websockets in current browsers; older Safari needs them spelled out.
+        sockets = f" ws://{host} wss://{host}" if host else ""
+        # The app window (pywebview) builds its bridge to Python with new Function(), which needs
+        # 'unsafe-eval'. Only for pages opened on this PC itself; injected scripts stay refused.
+        client = (scope.get("client") or ("", 0))[0]
+        on_this_pc = client in LOCAL_HOSTS and _is_local_name(host)
+        scripts = "'self' 'unsafe-eval'" if on_this_pc else "'self'"
+        policy = (
+            f"default-src 'self'; script-src {scripts}; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; media-src 'self' blob:; "
+            f"connect-src 'self'{sockets}; worker-src 'self'; manifest-src 'self'; "
+            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        )
+        path = scope["path"]
+        private = path.startswith(("/api/admin", "/admin", "/api/qr", "/qr"))
+
+        async def with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                present = {k.lower() for k, _ in headers}
+                extra = {
+                    b"content-security-policy": policy.encode(),
+                    b"x-frame-options": b"DENY",
+                    b"x-content-type-options": b"nosniff",
+                    b"referrer-policy": b"no-referrer",
+                    b"cross-origin-opener-policy": b"same-origin",
+                    b"cross-origin-resource-policy": b"same-origin",
+                    b"permissions-policy": b"camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+                }
+                if private and path.startswith(("/api/admin", "/api/qr")):
+                    headers = [(k, v) for k, v in headers if k.lower() != b"cache-control"]
+                    present.discard(b"cache-control")
+                    extra[b"cache-control"] = b"no-store"
+                headers += [(k, v) for k, v in extra.items() if k not in present]
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
 
 
 def _port_free(port: int) -> bool:
@@ -74,10 +184,7 @@ def _port_free(port: int) -> bool:
 
 def _is_local_name(address: str) -> bool:
     """The Host header of a request: "127.0.0.1:8000", "[::1]:8000", "localhost:8000"."""
-    try:
-        return urlsplit(f"//{address}").hostname in LOCAL_NAMES
-    except ValueError:
-        return False
+    return _host_name(address) in LOCAL_NAMES
 
 
 class LogFailedRequests:
@@ -151,6 +258,8 @@ class Services:
         self.restart = None  # set by __main__: start the app again (for a new port)
         self.firewall_problem = False  # the firewall rule opens another port than this server's
         self.firewall_change = ""  # how the last change of the rule went: ok, cancelled, failed
+        self.listener_devices: Counter[str] = Counter()  # open listener connections per address
+        self._own_names: tuple[float, set[str]] = (0.0, set())
         self.preparation = Preparation(self)
         self.trainer = Trainer(
             data,
@@ -207,6 +316,22 @@ class Services:
         if not urls[0]["wifi"]:
             urls[0]["wifi"] = s.wifi_name.strip()  # the one Wi-Fi name from before there were tabs
         return urls
+
+    def own_names(self) -> set[str]:
+        """The names other devices may use for this PC to reach the admin page: its addresses on
+        each network, its computer name, and the address typed in for the QR code."""
+        at, names = self._own_names
+        if time.monotonic() - at < OWN_NAMES_S and names:
+            return names
+        names = {n["ip"] for n in lan_networks()} | set(lan_addresses())
+        computer = socket.gethostname().lower()
+        names |= {computer, f"{computer}.local"}
+        typed = self.settings.public_host.strip()
+        if typed:
+            names.add(_host_name(typed.split("://", 1)[-1].split("/", 1)[0]))
+        names.discard("")
+        self._own_names = (time.monotonic(), names)
+        return names
 
     def admin_urls(self) -> list[dict]:
         """The admin page for other devices, one per network of this PC (named like listener_urls)."""
@@ -284,6 +409,8 @@ def create_app(
     app = FastAPI(title="Live Translate", lifespan=lifespan)
     app.state.services = services
     app.add_middleware(TunnelGuard, tunnel=services.tunnel)
+    app.add_middleware(LimitBody)
+    app.add_middleware(SecurityHeaders)
     app.add_middleware(LogFailedRequests)
 
     def client_ip(request: Request | WebSocket) -> str:
@@ -301,8 +428,16 @@ def create_app(
         return client_ip(request) in LOCAL_HOSTS and _is_local_name(request.headers.get("host", ""))
 
     def remote_admin_on() -> bool:
-        ws = services.settings.web_server
-        return ws.lan_admin and bool(ws.password_hash)
+        """Other devices may sign in. Never while listening over the internet is on: then the
+        admin page stays on this PC, however the tunnel's server is set up."""
+        s = services.settings
+        return s.web_server.lan_admin and bool(s.web_server.password_hash) and not s.remote.enabled
+
+    def check_own_address(request: Request | WebSocket) -> None:
+        """Another device must open the admin page by this PC's own address or name, not by some
+        other name that was made to point here (DNS rebinding)."""
+        if _host_name(request.headers.get("host", "")) not in services.own_names():
+            raise HTTPException(403, "Open the admin page by this computer's own address.")
 
     def admin_access(request: Request | WebSocket) -> str:
         """"local" on this PC; "remote" for another device that signed in (Settings → Web Server).
@@ -311,6 +446,7 @@ def create_app(
         if is_local(request):
             return "local"
         if remote_admin_on():
+            check_own_address(request)
             session_id = services.sessions.check(request.cookies.get(COOKIE), client_ip(request))
             if session_id:
                 request.state.session_id = session_id
@@ -392,6 +528,10 @@ def create_app(
             return RedirectResponse(_safe_next(request.query_params.get("next")), status_code=303)
         if not remote_admin_on():
             return HTMLResponse("<h1>403</h1><p>The admin page is only available on this computer.</p>", status_code=403)
+        try:
+            check_own_address(request)
+        except HTTPException as exc:
+            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
         return web.response("admin/login.html", request)
 
     def set_session_cookie(response: Response, token: str) -> None:
@@ -405,6 +545,7 @@ def create_app(
             return {"ok": True}  # this PC needs no password
         if not remote_admin_on():
             raise HTTPException(403, "The admin page is only available on this computer.")
+        check_own_address(request)
         ip = client_ip(request)
 
         def refuse_if_blocked() -> None:
@@ -451,6 +592,9 @@ def create_app(
 
     @app.get("/qr", include_in_schema=False)
     async def qr_page(request: Request):
+        # It lists this PC's networks and addresses: for the operator, not for everyone on the Wi-Fi.
+        if (refused := admin_page(request)) is not None:
+            return refused
         return web.response("admin/qr.html", request)
 
     @app.api_route("/static/{name:path}", methods=["GET", "HEAD"], include_in_schema=False)
@@ -477,8 +621,9 @@ def create_app(
         }
 
     @app.get("/api/qr/addresses")
-    async def qr_addresses():
-        """The tabs with the QR code (not reachable over the tunnel: it lists this PC's addresses)."""
+    async def qr_addresses(request: Request):
+        """The tabs with the QR code: they list this PC's addresses, so only for admins."""
+        require_admin(request)
         return {"addresses": await asyncio.to_thread(services.listener_urls)}
 
     @app.post("/api/admin/wifi-name")
@@ -496,7 +641,8 @@ def create_app(
         return {"addresses": await asyncio.to_thread(services.listener_urls)}
 
     @app.get("/api/qr.svg")
-    async def qr(url: str = ""):
+    async def qr(request: Request, url: str = ""):
+        require_admin(request)
         # Only addresses of this app, so the QR page can't be made to point anywhere else.
         if not url or url == services.listener_url():
             url = services.listener_url()
@@ -507,23 +653,51 @@ def create_app(
         svg = qr_svg(url)
         return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache"})
 
+    def listener_device(conn: Request | WebSocket) -> str:
+        """Who counts as one device. Over the tunnel everyone seems to be this PC, so there the
+        connection's own port tells them apart (only the total limit applies)."""
+        server = conn.scope.get("server") or (None, None)
+        client = conn.scope.get("client") or ("", 0)
+        if server[1] and server[1] == services.tunnel.local_port:
+            return f"tunnel:{client[1]}"
+        return client_ip(conn)
+
+    def listener_room(device: str) -> bool:
+        devices = services.listener_devices
+        return sum(devices.values()) < MAX_LISTENERS and devices[device] < MAX_LISTENERS_PER_DEVICE
+
+    def listener_join(device: str) -> None:
+        services.listener_devices[device] += 1
+
+    def listener_leave(device: str) -> None:
+        devices = services.listener_devices
+        devices[device] -= 1
+        if devices[device] <= 0:
+            del devices[device]
+
     @app.get("/audio/{lang}.mp3")
     async def audio_stream(lang: str, request: Request):
         if not services.speech.has_voice(lang):
             raise HTTPException(404, "No voice for this language")
         if lang not in {l["code"] for l in services.listener_languages()}:
             raise HTTPException(404, "Language not offered")
+        device = listener_device(request)
+        if not listener_room(device):
+            raise HTTPException(503, "Too many connections.")
         asyncio.create_task(services.speech.warm_up(lang))
         stream = services.speech.stream(lang)
-        queue = stream.subscribe()
-        services.pipeline.event("audio_listener", lang=lang, listeners=len(stream.clients))
 
         async def body():
+            # Counted from the first byte: a request that never gets that far holds nothing.
+            listener_join(device)
+            queue = stream.subscribe()
+            services.pipeline.event("audio_listener", lang=lang, listeners=len(stream.clients))
             try:
                 while True:
                     yield await queue.get()
             finally:
                 stream.unsubscribe(queue)
+                listener_leave(device)
                 services.pipeline.event("audio_listener", lang=lang, listeners=len(stream.clients))
 
         headers = {"Cache-Control": "no-cache, no-store", "X-Content-Type-Options": "nosniff"}
@@ -531,6 +705,17 @@ def create_app(
 
     @app.websocket("/ws/listen")
     async def listen(ws: WebSocket):
+        device = listener_device(ws)
+        if not listener_room(device):
+            await ws.close(code=1013)  # try again later
+            return
+        listener_join(device)
+        try:
+            await listen_on(ws)
+        finally:
+            listener_leave(device)
+
+    async def listen_on(ws: WebSocket):
         await ws.accept()
         conn = Connection(ws)
         services.hub.listeners.add(conn)
@@ -561,6 +746,14 @@ def create_app(
 
     # -- admin API -------------------------------------------------------------
 
+    def settings_for(access: str) -> dict:
+        """The settings as a page gets them: never the password hash; on another device not the
+        OBS password either (it is kept as it is when that device saves)."""
+        data = services.settings.model_dump(exclude={"web_server": {"password_hash"}})
+        if access == "remote":
+            data["obs"]["password"] = ""
+        return data
+
     def admin_state(access: str = "local") -> dict:
         s = services.settings
         tr = services.translator
@@ -578,7 +771,7 @@ def create_app(
             "version": __version__,
             "data_folder": str(services.data),
             "can_move_data": install_dir() is not None,
-            "settings": s.model_dump(exclude={"web_server": {"password_hash"}}),
+            "settings": settings_for(access),
             "access": access,
             "firewall_problem": services.firewall_problem,
             "status": services.pipeline.status(),
@@ -640,7 +833,14 @@ def create_app(
         new = Settings.model_validate(body)
         new.web_server = old.web_server  # changed in its own tab, only on this PC (/api/admin/webserver/*)
         if access == "remote":
-            new.remote = old.remote  # the tunnel goes with this PC's key
+            # What belongs to this PC: the tunnel goes with its key, a file path is read by this
+            # PC's account, the translation server gets every sentence, the OBS password is hidden.
+            new.remote = old.remote
+            new.audio.file_path = old.audio.file_path
+            new.libretranslate_url, new.libretranslate_port = old.libretranslate_url, old.libretranslate_port
+            new.obs.password = old.obs.password
+        if is_network_path(new.audio.file_path):
+            raise HTTPException(400, "Files on a network share can't be used; copy the file to this PC.")
         new.port = old.port  # the port only changes on restart (it is in the QR code)
         new.remote.local_port = old.remote.local_port  # bound at start
         # These have their own switch and slider; a page's older copy must not undo them.
@@ -648,6 +848,8 @@ def create_app(
         new.song_model = old.song_model  # so does training, and a page mustn't undo that either
         new.wifi_names = old.wifi_names  # typed in with the QR code
         services.store.save(new)
+        if new.remote.enabled and not old.remote.enabled:
+            end_sessions()  # listening over the internet: the admin page stays on this PC
         if new.start_with_windows != old.start_with_windows:
             autostart.apply(new.start_with_windows)
         if new.gpu_helpers != old.gpu_helpers:
@@ -739,9 +941,12 @@ def create_app(
         return current.folder if current else None
 
     def finished_log(name: str) -> Path:
+        """A service's folder, by its name: only a folder directly in the logs folder."""
         root = services.pipeline.logs_dir
+        if not SAFE_LOG_NAME.fullmatch(name) or name.strip(". ") != name.strip():
+            raise HTTPException(404, "No such service")
         folder = root / name
-        if folder.parent != root or folder == running_log() or not (folder / "events.jsonl").is_file():
+        if folder.resolve().parent != root.resolve() or folder == running_log() or not (folder / "events.jsonl").is_file():
             raise HTTPException(404, "No such service")
         return folder
 
@@ -779,9 +984,10 @@ def create_app(
 
     @app.post("/api/admin/training/add")
     async def training_add(request: Request):
-        """Lines with YouTube links or file paths. Channels and playlists come back, to choose from."""
-        require_admin(request)
-        return services.trainer.add(str((await request.json()).get("text", "")))
+        """Lines with YouTube links or file paths. Channels and playlists come back, to choose from.
+        File paths only on this PC: they are read with this PC's account."""
+        access = require_admin(request)
+        return services.trainer.add(str((await request.json()).get("text", "")), allow_files=access == "local")
 
     @app.post("/api/admin/training/list")
     async def training_list(request: Request):
@@ -1047,6 +1253,7 @@ def create_app(
         ws = s.web_server
         return {
             "lan_admin": ws.lan_admin,
+            "tunnel_on": s.remote.enabled,
             "password_set": bool(ws.password_hash),
             "password_short": ws.password_short,
             "min_password": MIN_PASSWORD,
@@ -1055,7 +1262,7 @@ def create_app(
             "firewall": await asyncio.to_thread(firewall.status, s.port),
             "firewall_change": services.firewall_change,
             "can_restart": services.restart is not None,
-            "admin_urls": await asyncio.to_thread(services.admin_urls) if ws.lan_admin else [],
+            "admin_urls": await asyncio.to_thread(services.admin_urls) if remote_admin_on() else [],
             "sessions": [
                 {k: row[k] for k in ("id", "created", "last_seen", "ip", "ua")} for row in services.sessions.list()
             ],

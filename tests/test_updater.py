@@ -16,7 +16,7 @@ RELEASE = {
         {"name": "notes.txt", "browser_download_url": "https://example.test/notes.txt"},
         {
             "name": "LiveTranslate-Setup-9.0.1.exe",
-            "browser_download_url": "https://example.test/LiveTranslate-Setup-9.0.1.exe",
+            "browser_download_url": "https://github.com/guido-visser/live-translate/releases/download/v9.0.1/LiveTranslate-Setup-9.0.1.exe",
             "size": len(INSTALLER),
             "digest": "sha256:" + hashlib.sha256(INSTALLER).hexdigest(),
         },
@@ -104,6 +104,21 @@ async def test_install_rejects_a_damaged_download(tmp_path, monkeypatch, fake_gi
         await u.install()
     assert not started and u.state == "error"
     assert not list((tmp_path / "updates").iterdir())
+
+
+async def test_only_a_checked_installer_from_github_is_run(tmp_path, monkeypatch, fake_github):
+    u, started, _ = make_updater(tmp_path, monkeypatch)
+    await u.check()
+    u.latest = {**u.latest, "download": "https://evil.example/LiveTranslate-Setup-9.0.1.exe"}
+    with pytest.raises(RuntimeError, match="can't be checked"):
+        await u.install()
+    await u.check()
+    u.latest = {**u.latest, "sha256": ""}  # GitHub sent no checksum
+    with pytest.raises(RuntimeError, match="can't be checked"):
+        await u.install()
+    assert not started
+    assert updater.trusted_download("https://objects.githubusercontent.com/x")
+    assert not updater.trusted_download("http://github.com/x")
 
 
 async def test_no_install_while_translating(tmp_path, monkeypatch, fake_github):
