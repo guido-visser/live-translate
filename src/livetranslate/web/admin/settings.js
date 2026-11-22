@@ -572,7 +572,7 @@
     $("vmixUrl").value = s.vmix.url;
     renderVmixLanguages();
     renderOverlayChannels();
-    $("vmixMaxChars").value = s.vmix.max_chars;
+    $("vmixMaxChars").value = s.vmix.line_chars;
     $("vmixAuto").checked = s.vmix.auto_overlay;
     renderVmixInputs();
     $("mainStreaming").value = s.main_streaming;
@@ -586,7 +586,7 @@
     renderObsLists();
     $("obsLanguage").value = s.obs.language;
     renderObsLanguages();
-    $("obsMaxChars").value = s.obs.max_chars;
+    $("obsMaxChars").value = s.obs.line_chars;
     $("obsAuto").checked = s.obs.auto_overlay;
 
     renderAddresses();
@@ -646,7 +646,7 @@
     s.vmix.field = $("vmixField").value;
     s.vmix.overlay = Number($("vmixOverlay").value);
     s.vmix.language = $("vmixLanguage").value;
-    s.vmix.max_chars = Math.max(20, Math.min(1000, Number($("vmixMaxChars").value) || 160));
+    s.vmix.line_chars = Math.max(10, Math.min(500, Number($("vmixMaxChars").value) || 50));
     s.vmix.auto_overlay = $("vmixAuto").checked;
     s.main_streaming = $("mainStreaming").value;
     s.obs.enabled = $("obsEnabled").checked;
@@ -656,7 +656,7 @@
     s.obs.source = $("obsSource").value;
     s.obs.scene = $("obsScene").value;
     s.obs.language = $("obsLanguage").value;
-    s.obs.max_chars = Math.max(20, Math.min(1000, Number($("obsMaxChars").value) || 160));
+    s.obs.line_chars = Math.max(10, Math.min(500, Number($("obsMaxChars").value) || 50));
     s.obs.auto_overlay = $("obsAuto").checked;
 
     s.public_host = $("address").value === "__custom" ? "" : $("address").value;

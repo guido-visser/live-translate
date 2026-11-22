@@ -102,6 +102,31 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 16px;
 }
 
+.home-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 12px 8px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.home-hint img { flex: none; border-radius: 9px; }
+.home-hint div { flex: 1; min-width: 0; }
+.home-hint p { margin: 2px 0 0; color: var(--muted); }
+.home-hint-close {
+  flex: none;
+  width: 36px; height: 36px;
+  margin: -4px 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+}
+
 main { padding: 8px 16px; }
 .empty { color: var(--muted); text-align: center; margin-top: 30vh; }
 .seg {

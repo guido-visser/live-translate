@@ -133,6 +133,35 @@ def test_pause_is_broadcast(client):
         assert receive_until(ws, "status")["paused"] is True
 
 
+def test_clear_empties_the_transcript_everywhere(client):
+    from tests.test_vmix import FakeVmix
+
+    fake = FakeVmix()
+    client.services.vmix._transport = fake.transport
+    settings = client.get("/api/admin/state").json()["settings"]
+    settings["vmix"].update(enabled=True, input="bbb-222", field="Headline.Text")
+    client.post("/api/admin/settings", json=settings)
+    pipeline = client.services.pipeline
+
+    with client.websocket_connect("/ws/listen") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "lang", "lang": "ru"})
+        receive_until(ws, "history")
+        client.portal.call(pipeline._sentences.put_nowait, ("Test, test, één twee.", time.time(), "nl"))
+        receive_until(ws, "segment")
+        assert client.get("/api/admin/state").json()["history"]
+
+        assert client.post("/api/admin/clear").json() == {"ok": True}
+        receive_until(ws, "clear")
+
+    assert client.get("/api/admin/state").json()["history"] == []
+    assert fake.calls[-1]["Value"] == ""  # vMix shows nothing either
+    with client.websocket_connect("/ws/listen") as ws:  # a phone that opens the page now
+        ws.receive_json()
+        ws.send_json({"type": "lang", "lang": "ru"})
+        assert receive_until(ws, "history")["segments"] == []
+
+
 def test_qr_code_and_pages(client):
     assert client.get("/api/qr.svg").text.startswith("<svg")
     assert "ws/listen" in client.get("/static/client/app.js").text

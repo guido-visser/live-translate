@@ -247,6 +247,8 @@ input[type=search] { width: 100%; padding: 7px 10px; border: 1px solid var(--bor
 .stream-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
 .stream-head h2 { margin: 0; white-space: nowrap; }
 .stream-head span { text-align: right; min-width: 0; }
+.transcript-head { align-items: center; }
+.transcript-head .icon-btn { padding: 4px 10px; }
 .donate { display: inline-block; font-weight: 600; color: var(--text); text-decoration: none; }
 .donate:hover { border-color: var(--accent); }
 .about-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }

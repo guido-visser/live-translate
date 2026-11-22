@@ -43,7 +43,7 @@ LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 LOCAL_NAMES = {"127.0.0.1", "::1", "localhost", "testserver"}
 WHISPER_MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
 # What phones may reach through the internet tunnel: the listener page and nothing else.
-TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/api/public", "/ws/listen", "/static/icon.png"}
+TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/sw.js", "/api/public", "/ws/listen", "/static/icon.png"}
 TUNNEL_PREFIXES = ("/static/client/", "/audio/")
 
 
@@ -261,6 +261,11 @@ def create_app(
     @app.get("/manifest.webmanifest", include_in_schema=False)
     async def manifest(request: Request):
         return web.response("client/manifest.webmanifest", request)
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker(request: Request):
+        # At the top, not under /static/: a service worker only covers pages below its own address.
+        return web.response("client/sw.js", request)
 
     @app.get("/admin", include_in_schema=False)
     async def admin_page(request: Request):
@@ -534,6 +539,12 @@ def create_app(
         body = await request.json()
         services.pipeline.set_paused(bool(body.get("paused")))
         return {"paused": services.pipeline.paused}
+
+    @app.post("/api/admin/clear")
+    async def clear_transcript(request: Request):
+        require_admin(request)
+        await services.pipeline.clear_transcript()
+        return {"ok": True}
 
     @app.get("/api/admin/profile")
     async def church_profile(request: Request):

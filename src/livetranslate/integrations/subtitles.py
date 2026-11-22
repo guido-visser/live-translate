@@ -7,23 +7,51 @@ import logging
 log = logging.getLogger(__name__)
 
 
-def tail(text: str, max_chars: int) -> str:
-    """The end of a long sentence, cut at a word boundary, marked with an ellipsis."""
-    if len(text) <= max_chars:
-        return text
-    cut = text[-(max_chars - 1) :]
-    space = cut.find(" ")
-    if 0 <= space < len(cut) - 1:
-        cut = cut[space + 1 :]
-    return "…" + cut
+def wrap(text: str, width: int) -> list[str]:
+    """Lines of at most width characters, broken between words (a word longer than that is cut)."""
+    lines: list[str] = []
+    line = ""
+    for word in text.split():
+        while len(word) > width:
+            if line:
+                lines.append(line)
+                line = ""
+            lines.append(word[:width])
+            word = word[width:]
+        if not word:
+            continue
+        if not line:
+            line = word
+        elif len(line) + 1 + len(word) <= width:
+            line += " " + word
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    return lines
 
 
-def compose(previous: str | None, current: str, max_chars: int) -> str:
-    """Rolling two-line subtitle: previous sentence above the current one, if both fit."""
-    current = tail(current, max_chars)
-    if previous and len(previous) + 1 + len(current) <= max_chars:
-        return f"{previous}\n{current}"
-    return current
+def tail(text: str, width: int, max_lines: int = 2) -> list[str]:
+    """The end of a sentence that is too long, after an ellipsis, in at most max_lines lines."""
+    words = text.split()
+    for start in range(1, len(words)):
+        lines = wrap("…" + " ".join(words[start:]), width)
+        if len(lines) <= max_lines:
+            return lines
+    return wrap("…" + text.strip()[-(width * max_lines - 1) :], width)[-max_lines:]
+
+
+def compose(previous: str | None, current: str, line_chars: int) -> str:
+    """Rolling subtitle of at most two lines of line_chars each, broken here so the title never
+    wraps them into a third: a one-line previous sentence above a one-line current one, otherwise
+    the current sentence alone (its end, when it doesn't fit in two lines)."""
+    lines = wrap(current, line_chars)
+    if len(lines) > 2:
+        lines = tail(current, line_chars)
+    if len(lines) == 1 and previous and len(previous) <= line_chars:
+        lines = [previous, *lines]
+    return "\n".join(lines)
 
 
 class SubtitleOutput:
@@ -78,8 +106,10 @@ class SubtitleOutput:
     async def push(self, sentence: str) -> None:
         if not self.active:
             return
-        text = compose(self.previous, sentence, self.settings.max_chars)
-        self.previous = text.split("\n")[-1]
+        width = self.settings.line_chars
+        text = compose(self.previous, sentence, width)
+        current = wrap(sentence, width)
+        self.previous = current[0] if len(current) == 1 else None  # may stay above the next one
         await self.show(text)
 
     async def clear(self) -> None:

@@ -47,6 +47,8 @@
     $("audioLabel").textContent = state.audioOn ? t("listening") : t("listen");
     $("empty").textContent = state.running ? t("waiting") : t("notStarted");
     $("jump").title = t("newText");
+    $("installLabel").textContent = t("install");
+    updateHomeHint();
     updateBanner();
   }
 
@@ -178,6 +180,13 @@
       case "segment":
         if (msg.lang && msg.lang !== state.lang) return;
         addSegment({ id: msg.id, text: msg.text });
+        break;
+      case "clear": // the operator cleared what was said before the service
+        state.segments = [];
+        renderSegments();
+        setPartial("");
+        setTyping(false);
+        $("jump").hidden = true;
         break;
       case "partial":
         setPartial(msg.text);
@@ -409,6 +418,56 @@
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 5000);
   }
+
+  // -- on the home screen ------------------------------------------------------------
+
+  // Browsers only allow this over https (the internet address); on the church Wi-Fi (plain http)
+  // the browser's own "Add to Home screen" still gives the icon.
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+  let installPrompt = null;
+  window.addEventListener("beforeinstallprompt", (ev) => {
+    ev.preventDefault();
+    installPrompt = ev;
+    $("installBtn").hidden = false;
+    updateHomeHint(); // the button does it now
+  });
+  window.addEventListener("appinstalled", () => {
+    installPrompt = null;
+    $("installBtn").hidden = true;
+    store.set("lt.homeHint", false);
+    updateHomeHint();
+  });
+
+  // Where the browser doesn't offer installing by itself (plain http on the church Wi-Fi, and
+  // Safari always), a card says how to put the page on the home screen by hand. Phones and
+  // tablets only, not once it is there, and not again after ✕.
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); // iPadOS says it is a Mac
+  const android = /Android/.test(navigator.userAgent);
+  const onHomeScreen = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+
+  function updateHomeHint() {
+    const show = Boolean(state.lang) && !onHomeScreen && store.get("lt.homeHint", true) &&
+      (ios || (android && !installPrompt));
+    $("homeHint").hidden = !show;
+    if (show) {
+      $("homeHintTitle").textContent = t("homeTitle");
+      $("homeHintSteps").textContent = t(ios ? "homeIos" : "homeAndroid");
+    }
+  }
+  $("homeHintClose").addEventListener("click", () => {
+    store.set("lt.homeHint", false);
+    updateHomeHint();
+  });
+  $("installBtn").addEventListener("click", async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    try { await installPrompt.userChoice; } catch { /* dismissed */ }
+    installPrompt = null;
+    $("installBtn").hidden = true;
+  });
 
   applyFont();
   applyTheme();

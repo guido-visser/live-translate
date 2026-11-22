@@ -31,6 +31,12 @@ def test_over_the_tunnel_only_the_listener_page_is_served(tmp_path):
     with make_client(tmp_path, local_port=80) as c:
         assert c.get("/").status_code == 200
         assert c.get("/static/client/app.js").status_code == 200
+        # Installing the page on a phone's home screen works over the internet address (https).
+        assert c.get("/sw.js").status_code == 200
+        manifest = c.get("/manifest.webmanifest").json()
+        for icon in manifest["icons"]:
+            assert c.get(icon["src"]).status_code == 200, icon["src"]
+        assert c.get("/static/client/apple-touch-icon.png").status_code == 200
         assert c.get("/api/public").json()["url"] == "https://vertaling.example.nl/"
         for path in ("/admin", "/admin/settings", "/api/admin/state", "/qr", "/api/qr/addresses", "/static/admin/settings.js"):
             assert c.get(path).status_code == 403, path

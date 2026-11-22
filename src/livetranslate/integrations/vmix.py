@@ -13,7 +13,7 @@ from collections.abc import Callable
 import httpx
 
 from ..config import Settings, VmixSettings
-from .subtitles import SubtitleOutput, compose, tail  # noqa: F401
+from .subtitles import SubtitleOutput, compose, tail, wrap  # noqa: F401
 
 log = logging.getLogger(__name__)
 

@@ -503,6 +503,16 @@ class Pipeline:
                     await output.push(text)
         self.stats["latency_s"] = round(time.time() - created, 2)
 
+    async def clear_transcript(self) -> None:
+        """The operator's Clear button: what was said before the service (the PC was switched on
+        early) disappears from the operator page, the phones and the streaming software."""
+        self.history.clear()
+        self._log("clear")
+        self.hub.to_admins({"type": "clear"})
+        self.hub.to_listeners({"type": "clear"})
+        for output in self.outputs:
+            await output.clear()
+
     def clear_translations(self) -> None:
         for seg in self.history:
             seg.translations.clear()

@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from livetranslate.config import Settings, VmixSettings
-from livetranslate.integrations.vmix import VmixOutput, compose, parse_state, tail
+from livetranslate.integrations.vmix import VmixOutput, compose, parse_state, tail, wrap
 
 VMIX_XML = """<vmix>
   <version>27.0.0.49</version>
@@ -40,17 +40,58 @@ def make_output(fake: FakeVmix, **vmix) -> VmixOutput:
     return VmixOutput(lambda: settings, transport=fake.transport)
 
 
-def test_tail_cuts_at_word_boundary():
-    assert tail("kort", 20) == "kort"
-    cut = tail("dit is een hele lange zin die niet past", 20)
-    assert cut.startswith("…") and len(cut) <= 20 and cut.endswith("niet past")
-    assert not cut[1:].startswith(" ")
+def test_wrap_breaks_between_words():
+    assert wrap("kort", 20) == ["kort"]
+    assert wrap("dit is een hele lange zin die niet past", 20) == ["dit is een hele", "lange zin die niet", "past"]
+    assert wrap("Godsvertrouwen", 5) == ["Godsv", "ertro", "uwen"]
+
+
+def test_tail_keeps_the_end_in_two_lines():
+    lines = tail("dit is een hele lange zin die niet past in twee regels van twintig", 20)
+    assert len(lines) == 2 and all(len(line) <= 20 for line in lines)
+    assert lines[0].startswith("…") and not lines[0][1:].startswith(" ")
+    assert lines[-1].endswith("van twintig")
 
 
 def test_compose_rolls_two_lines():
-    assert compose(None, "Eerste zin.", 80) == "Eerste zin."
-    assert compose("Eerste zin.", "Tweede zin.", 80) == "Eerste zin.\nTweede zin."
-    assert compose("Een vorige zin die lang is.", "Nieuwe zin.", 30) == "Nieuwe zin."
+    assert compose(None, "Eerste zin.", 40) == "Eerste zin."
+    assert compose("Eerste zin.", "Tweede zin.", 40) == "Eerste zin.\nTweede zin."
+    # A current sentence of two lines leaves no room for the previous one.
+    assert compose("Eerste zin.", "Een tweede zin die niet op één regel past.", 30) == (
+        "Een tweede zin die niet op één\nregel past."
+    )
+
+
+@pytest.mark.parametrize("width", [20, 32, 42, 60])
+def test_compose_never_gives_more_than_two_lines(width):
+    words = ("De Heer is mijn herder, mij ontbreekt niets. Hij laat mij neerliggen in grazige weiden, "
+             "Hij voert mij zachtjes naar rustige wateren.").split()
+    previous = None
+    for n in range(1, len(words) + 1):
+        sentence = " ".join(words[:n])
+        lines = compose(previous, sentence, width).split("\n")
+        assert len(lines) <= 2 and all(len(line) <= width for line in lines), (width, sentence)
+        previous = wrap(sentence, width)[0] if len(wrap(sentence, width)) == 1 else None
+
+
+async def test_push_keeps_a_short_previous_sentence_only():
+    fake = FakeVmix()
+    out = make_output(fake, line_chars=30)
+    await out.push("Welkom allemaal.")
+    await out.push("Vandaag lezen we uit Psalm drieëntwintig, vers één.")  # two lines on its own
+    await out.push("Amen.")  # the long one doesn't go above it
+    assert [c["Value"] for c in fake.calls] == [
+        "Welkom allemaal.",
+        "Vandaag lezen we uit Psalm\ndrieëntwintig, vers één.",
+        "Amen.",
+    ]
+
+
+def test_old_max_chars_setting_becomes_characters_per_line():
+    old = {"enabled": True, "max_chars": 160}
+    assert VmixSettings.model_validate(old).line_chars == 80
+    assert VmixSettings.model_validate({**old, "line_chars": 42}).line_chars == 42
+    assert VmixSettings().line_chars == 50
 
 
 def test_parse_state_lists_title_inputs_and_overlays():

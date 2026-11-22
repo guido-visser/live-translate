@@ -55,6 +55,12 @@
   }
   $("markBtn").addEventListener("click", markMoment);
 
+  // Before the service: what was picked up since the PC started goes, here and on the phones.
+  $("clearBtn").addEventListener("click", async () => {
+    await api("/api/admin/clear", { method: "POST" });
+    clearTranscript();
+  });
+
   $("startBtn").addEventListener("click", async () => {
     await api(status.state === "stopped" ? "/api/admin/start" : "/api/admin/stop", { method: "POST" });
   });
@@ -419,6 +425,11 @@
     if (stick) box.scrollTop = box.scrollHeight;
   }
 
+  function clearTranscript() {
+    $("transcript").textContent = "";
+    $("partial").textContent = "";
+  }
+
   function renderStats(stats, gpu) {
     const rows = [
       ["statDevice", stats.device ? stats.device.toUpperCase() : "–"],
@@ -483,6 +494,8 @@
         renderStatus();
       } else if (msg.type === "segment") {
         addTranscript(msg.text, msg.lang);
+      } else if (msg.type === "clear") {
+        clearTranscript();
       } else if (msg.type === "partial") {
         $("partial").textContent = msg.text;
       }

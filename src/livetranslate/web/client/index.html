@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111418">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Translation">
   <title>Live translation</title>
   <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="apple-touch-icon" href="/static/client/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/static/client/style.css">
 </head>
@@ -16,6 +19,9 @@
       <span class="globe" aria-hidden="true">🌐</span><span id="langName">…</span>
     </button>
     <div class="bar-actions">
+      <button id="installBtn" class="icon-btn" type="button" hidden>
+        <span class="icon" aria-hidden="true">⤓</span><span id="installLabel" class="label"></span>
+      </button>
       <button id="audioBtn" class="icon-btn" type="button" aria-pressed="false" hidden>
         <span class="icon" aria-hidden="true">🔈</span><span id="audioLabel" class="label"></span>
       </button>
@@ -24,6 +30,15 @@
   </header>
 
   <div id="banner" class="banner" hidden></div>
+
+  <aside id="homeHint" class="home-hint" hidden>
+    <img src="/static/client/icon-192.png" alt="" width="40" height="40">
+    <div>
+      <strong id="homeHintTitle"></strong>
+      <p id="homeHintSteps"></p>
+    </div>
+    <button id="homeHintClose" class="home-hint-close" type="button">✕</button>
+  </aside>
 
   <main id="feed" aria-live="polite">
     <p id="empty" class="empty"></p>

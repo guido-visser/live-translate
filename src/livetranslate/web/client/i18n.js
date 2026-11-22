@@ -12,6 +12,10 @@ window.I18N = {
     audioHint: "Use earphones. Audio keeps playing when the screen is off.",
     audioError: "Audio could not start. Tap again.",
     newText: "New text",
+    install: "Install",
+    homeTitle: "Put this page on your home screen",
+    homeIos: "Tap Share, then “Add to Home Screen”.",
+    homeAndroid: "Open the browser menu (⋮), then “Add to Home screen”.",
   },
   nl: {
     choose: "Kies je taal",
@@ -25,6 +29,10 @@ window.I18N = {
     audioHint: "Gebruik oortjes. Het geluid speelt door als het scherm uit is.",
     audioError: "Geluid kon niet starten. Tik nogmaals.",
     newText: "Nieuwe tekst",
+    install: "Installeren",
+    homeTitle: "Zet deze pagina op je beginscherm",
+    homeIos: "Tik op Deel en dan op “Zet op beginscherm”.",
+    homeAndroid: "Open het browsermenu (⋮) en kies “Toevoegen aan startscherm”.",
   },
   ru: {
     choose: "Выберите язык",
@@ -38,6 +46,10 @@ window.I18N = {
     audioHint: "Используйте наушники. Звук продолжает играть при выключенном экране.",
     audioError: "Не удалось включить звук. Нажмите ещё раз.",
     newText: "Новый текст",
+    install: "Установить",
+    homeTitle: "Добавьте эту страницу на главный экран",
+    homeIos: "Нажмите «Поделиться», затем «На экран „Домой“».",
+    homeAndroid: "Откройте меню браузера (⋮) и выберите «Добавить на главный экран».",
   },
   uk: {
     choose: "Оберіть мову",
@@ -51,5 +63,9 @@ window.I18N = {
     audioHint: "Використовуйте навушники. Звук грає навіть при вимкненому екрані.",
     audioError: "Не вдалося увімкнути звук. Натисніть ще раз.",
     newText: "Новий текст",
+    install: "Встановити",
+    homeTitle: "Додайте цю сторінку на головний екран",
+    homeIos: "Натисніть «Поділитися», потім «На початковий екран».",
+    homeAndroid: "Відкрийте меню браузера (⋮) і виберіть «Додати на головний екран».",
   },
 };

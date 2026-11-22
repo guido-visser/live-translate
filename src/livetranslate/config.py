@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from platformdirs import user_config_dir, user_data_dir
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 APP_NAME = "LiveTranslate"
 LOCATION_FILE = "data-location.txt"
@@ -87,7 +87,23 @@ class TranslationSettings(BaseModel):
     clean_language: bool = True
 
 
-class VmixSettings(BaseModel):
+class SubtitleSettings(BaseModel):
+    """What vMix and OBS subtitles have in common."""
+
+    # Characters that fit on one line of the title: the text is broken into at most two such lines
+    # here, so the title never wraps a long line into a third.
+    line_chars: int = Field(50, ge=10, le=500)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_max_chars(cls, data):
+        # Until 0.1.15 there was max_chars, for both lines together: half of it per line.
+        if isinstance(data, dict) and "line_chars" not in data and "max_chars" in data:
+            data = {**data, "line_chars": max(10, min(500, int(data["max_chars"]) // 2))}
+        return data
+
+
+class VmixSettings(SubtitleSettings):
     """Subtitles sent to a vMix Title input (via the vMix Web API)."""
 
     enabled: bool = False
@@ -97,12 +113,11 @@ class VmixSettings(BaseModel):
     # Language shown in vMix; empty = the main language. Speech in another language is translated.
     language: str = ""
     overlay: int = Field(1, ge=1, le=16)
-    max_chars: int = Field(160, ge=20, le=1000)
     # On a spoken-language switch: overlay in when vMix shows a translation, out when it shows the original.
     auto_overlay: bool = True
 
 
-class ObsSettings(BaseModel):
+class ObsSettings(SubtitleSettings):
     """Subtitles sent to a text source in OBS Studio (via its WebSocket server)."""
 
     enabled: bool = False
@@ -113,7 +128,6 @@ class ObsSettings(BaseModel):
     scene: str = ""  # scene with its eye; empty = the scene on air
     # Language shown in OBS; empty = the main language. Speech in another language is translated.
     language: str = ""
-    max_chars: int = Field(160, ge=20, le=1000)
     # On a spoken-language switch: show the text when OBS shows a translation, hide it when it shows the original.
     auto_overlay: bool = True
 
