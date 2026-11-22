@@ -2,7 +2,7 @@
 (() => {
   "use strict";
 
-  const { $, t, api, withPin, langName, sortByName, languageMatches } = window.LT;
+  const { $, t, api, langName, sortByName, languageMatches } = window.LT;
 
   // Essential steps can't be skipped: the app can't translate without knowing these languages.
   const STEPS = [
@@ -342,7 +342,7 @@
 
   async function finish() {
     await api("/api/admin/setup/finish", { method: "POST" });
-    location.href = withPin("/admin");
+    location.href = "/admin";
   }
 
   $("wizNext").addEventListener("click", async () => {
@@ -374,6 +374,7 @@
   Promise.all([api("/api/admin/state"), api("/api/admin/devices"), api("/api/admin/setup/status")]).then(([st, d, status]) => {
     state = st;
     devices = d;
+    window.LT.showAccess(state.access);
     s = structuredClone(state.settings);
     if (!new URLSearchParams(location.search).has("again")) {
       // A first time: no languages assumed. These are only what the settings start out with.

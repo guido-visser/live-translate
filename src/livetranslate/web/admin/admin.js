@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const { $, t, api, withPin, langName } = window.LT;
+  const { $, t, api, langName } = window.LT;
 
   let state = null; // last /api/admin/state
   let status = { state: "stopped", paused: false, error: "" };
@@ -329,7 +329,7 @@
     $("wifiForm").hidden = true;
     $("wifiLine").hidden = false;
     try { localStorage.setItem("lt.qr.url", url); } catch { /* ignore */ }
-    $("qrImg").src = withPin(`/api/qr.svg?url=${encodeURIComponent(url)}&t=${Date.now()}`);
+    $("qrImg").src = `/api/qr.svg?url=${encodeURIComponent(url)}&t=${Date.now()}`;
     $("url").textContent = url;
     $("url").href = url;
     $("qrTabs").querySelectorAll("button").forEach((b) => {
@@ -454,6 +454,8 @@
 
   async function loadState() {
     state = await api("/api/admin/state");
+    window.LT.showAccess(state.access);
+    $("firewallBar").hidden = !state.firewall_problem;
     status = state.status;
     translator = state.translator;
     renderStatus();
@@ -470,7 +472,7 @@
 
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(withPin(`${proto}://${location.host}/ws/admin`));
+    const ws = new WebSocket(`${proto}://${location.host}/ws/admin`);
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === "tick") {
@@ -500,7 +502,7 @@
         $("partial").textContent = msg.text;
       }
     };
-    ws.onclose = () => setTimeout(connect, 2000);
+    ws.onclose = (ev) => window.LT.socketClosed(ev, connect);
   }
 
   // Settings may change in the other page (or tab): pick them up when we come back.

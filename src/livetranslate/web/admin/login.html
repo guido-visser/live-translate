@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Live Translate</title>
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="stylesheet" href="/static/admin/admin.css">
+</head>
+<body class="login-page">
+  <header class="top">
+    <h1>Live Translate</h1>
+    <div class="top-actions">
+      <select id="uiLang" aria-label="Language">
+        <option value="nl">NL</option>
+        <option value="en">EN</option>
+        <option value="ru">RU</option>
+        <option value="uk">UK</option>
+      </select>
+    </div>
+  </header>
+
+  <main class="login-main">
+    <form id="loginForm" class="card login-card">
+      <h2 data-t="loginTitle"></h2>
+      <p class="small muted" data-t="loginHelp"></p>
+      <div class="row">
+        <label for="password" data-t="wsPassword"></label>
+        <input id="password" type="password" autocomplete="current-password" required autofocus>
+      </div>
+      <button id="loginBtn" type="submit" class="primary" data-t="loginButton"></button>
+      <p id="loginError" class="error" role="alert" hidden></p>
+    </form>
+  </main>
+
+  <script src="/admin/defaults.js"></script>
+  <script src="/static/admin/i18n.js"></script>
+  <script src="/static/admin/common.js"></script>
+  <script>
+    (() => {
+      "use strict";
+      const { $, t } = window.LT;
+      const next = new URLSearchParams(location.search).get("next") || "/admin";
+      // Only back to a page of the admin itself (the server checks this as well).
+      const target = next.startsWith("/admin") && !next.startsWith("/admin/login") && !next.includes("//") ? next : "/admin";
+
+      function showError(text) {
+        $("loginError").textContent = text;
+        $("loginError").hidden = !text;
+      }
+
+      $("loginForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        showError("");
+        $("loginBtn").disabled = true;
+        try {
+          const res = await fetch("/api/admin/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: $("password").value }),
+          });
+          if (res.ok) {
+            location.replace(target);
+            return;
+          }
+          if (res.status === 429) {
+            const minutes = Math.max(1, Math.ceil(Number(res.headers.get("Retry-After") || 900) / 60));
+            showError(t("loginBlocked").replace("{n}", minutes));
+          } else if (res.status === 401) {
+            showError(t("loginWrong"));
+            $("password").select();
+          } else {
+            showError(t("loginOff"));
+          }
+        } catch {
+          showError(t("loginNoConnection"));
+        } finally {
+          $("loginBtn").disabled = false;
+        }
+      });
+      window.LT.applyTexts();
+    })();
+  </script>
+</body>
+</html>

@@ -3,8 +3,18 @@ window.LT = (() => {
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const pin = new URLSearchParams(location.search).get("pin");
-  const withPin = (url) => (pin ? `${url}${url.includes("?") ? "&" : "?"}pin=${encodeURIComponent(pin)}` : url);
+
+  // Another device that isn't signed in (any more): to the login page, and back here afterwards.
+  function toLogin() {
+    location.href = `/admin/login?next=${encodeURIComponent(location.pathname + location.search + location.hash)}`;
+  }
+
+  // The admin websocket closed: 4401 = signed out on the PC, 4403 = no longer open to other devices.
+  function socketClosed(ev, reconnect) {
+    if (ev.code === 4401) toLogin();
+    else if (ev.code === 4403) location.reload();
+    else setTimeout(reconnect, 2000);
+  }
 
   // The operator's own pick wins; otherwise the installer's (or Windows') language.
   let lang = window.LT_UI_LANG || "en";
@@ -36,11 +46,14 @@ window.LT = (() => {
         applyTexts();
       });
     }
-    document.querySelectorAll("a[data-pin-link]").forEach((a) => (a.href = withPin(a.getAttribute("href"))));
   });
 
   async function api(path, options = {}) {
-    const res = await fetch(withPin(path), { headers: { "Content-Type": "application/json" }, ...options });
+    const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+    if (res.status === 401) {
+      toLogin();
+      throw new Error(t("signedOut"));
+    }
     if (!res.ok) {
       let detail = await res.text();
       try { detail = JSON.parse(detail).detail || detail; } catch { /* plain text */ }
@@ -205,9 +218,26 @@ window.LT = (() => {
     closeDialog.showModal();
   }
 
+  // On another device: a sign-out button in the header (access comes from /api/admin/state).
+  function showAccess(access) {
+    if (access !== "remote" || $("signOut")) return;
+    const button = document.createElement("button");
+    button.id = "signOut";
+    button.type = "button";
+    button.className = "icon-btn";
+    button.dataset.t = "signOut";
+    button.textContent = t("signOut");
+    button.addEventListener("click", async () => {
+      await window.LT.beforeClosing?.();
+      try { await fetch("/api/admin/logout", { method: "POST" }); } finally { location.href = "/admin/login"; }
+    });
+    const actions = document.querySelector("header .top-actions");
+    actions?.insertBefore(button, $("uiLang"));
+  }
+
   return {
-    askClose,
-    $, withPin, t, api, saveSettings, applyTexts, onLanguageChange, langName, sortByName, fillDevices, fillChannels,
+    askClose, toLogin, socketClosed, showAccess,
+    $, t, api, saveSettings, applyTexts, onLanguageChange, langName, sortByName, fillDevices, fillChannels,
     autonym, languageMatches, protectNames,
     get lang() { return lang; },
   };

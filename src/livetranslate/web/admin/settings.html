@@ -9,7 +9,7 @@
 </head>
 <body class="settings-page">
   <header class="top">
-    <a class="icon-btn" href="/admin" data-pin-link><span aria-hidden="true">←</span> <span data-t="back"></span></a>
+    <a class="icon-btn" href="/admin"><span aria-hidden="true">←</span> <span data-t="back"></span></a>
     <h1 data-t="settings"></h1>
     <div class="top-actions">
       <span id="saved" class="muted small save-status" role="status" hidden></span>
@@ -33,6 +33,7 @@
       <button type="button" role="tab" data-tab="training" data-t="tabTraining"></button>
       <button type="button" role="tab" data-tab="streaming" data-t="tabStreaming"></button>
       <button type="button" role="tab" data-tab="network" data-t="tabNetwork"></button>
+      <button type="button" role="tab" data-tab="webserver" data-t="tabWebServer"></button>
       <button type="button" role="tab" data-tab="startup" data-t="tabStartup"></button>
       <button type="button" role="tab" data-tab="log" data-t="tabLog"></button>
       <button type="button" role="tab" data-tab="about" data-t="tabAbout"></button>
@@ -348,16 +349,6 @@
           <label for="wifi" data-t="wifi"></label>
           <input id="wifi" type="text">
         </div>
-        <div class="row pair">
-          <div>
-            <label for="pin" data-t="pin"></label>
-            <input id="pin" type="text" inputmode="numeric">
-          </div>
-          <div>
-            <label for="port" data-t="port"></label>
-            <input id="port" type="text" readonly>
-          </div>
-        </div>
 
         <h2 data-t="internet"></h2>
         <p class="small muted" data-t="internetHelp"></p>
@@ -411,6 +402,77 @@
           </details>
         </div>
 
+      </section>
+
+      <!-- Web Server: changed through its own requests, never by the page's auto-save -->
+      <section class="tab-panel" data-panel="webserver" role="tabpanel">
+        <p id="wsRemoteNote" class="warn-text" data-t="wsRemoteNote" hidden></p>
+        <p id="wsError" class="error" role="alert" hidden></p>
+
+        <h2 data-t="wsAdminTitle"></h2>
+        <p class="small muted" data-t="wsAdminHelp"></p>
+        <label class="check"><input id="wsLan" type="checkbox"> <span data-t="wsLan"></span></label>
+        <p id="wsLanNeedsPassword" class="small muted" data-t="wsLanNeedsPassword" hidden></p>
+
+        <div id="wsPasswordBox">
+          <h3 data-t="wsPassword"></h3>
+          <p id="wsPasswordState" class="small"></p>
+          <div class="row pair">
+            <div>
+              <label for="wsNewPassword" data-t="wsNewPassword"></label>
+              <input id="wsNewPassword" type="password" autocomplete="new-password">
+            </div>
+            <div>
+              <label for="wsRepeatPassword" data-t="wsRepeatPassword"></label>
+              <input id="wsRepeatPassword" type="password" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="inline-buttons">
+            <button id="wsSavePassword" type="button" class="primary" data-t="wsSavePassword"></button>
+            <span id="wsPasswordMessage" class="small" role="status"></span>
+          </div>
+        </div>
+
+        <div id="wsAddresses" hidden>
+          <h3 data-t="wsAddresses"></h3>
+          <p class="small muted" data-t="wsAddressesHelp"></p>
+          <div id="wsAddressList" class="ws-addresses"></div>
+        </div>
+
+        <div id="wsSessionsBox">
+          <h3 data-t="wsSessions"></h3>
+          <p id="wsNoSessions" class="small muted" data-t="wsNoSessions"></p>
+          <table id="wsSessions" class="train-result ws-sessions" hidden>
+            <thead><tr><th data-t="wsDevice"></th><th data-t="wsIp"></th><th data-t="wsLastSeen"></th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="inline-buttons">
+            <button id="wsSignOutAll" type="button" data-t="wsSignOutAll"></button>
+          </div>
+        </div>
+
+        <p class="small warn-text" data-t="wsHttpWarning"></p>
+
+        <h2 data-t="wsPortTitle"></h2>
+        <div class="row">
+          <label for="wsPort" data-t="port"></label>
+          <div class="inline">
+            <input id="wsPort" type="number" min="1024" max="65535">
+            <button id="wsApplyPort" type="button" data-t="wsApplyPort"></button>
+          </div>
+        </div>
+        <p class="small muted" data-t="wsPortHelp"></p>
+        <p id="wsFirewall" class="small"></p>
+        <div class="inline-buttons">
+          <button id="wsFixFirewall" type="button" data-t="wsFixFirewall" hidden></button>
+        </div>
+        <div id="wsRestartBox" hidden>
+          <p id="wsRestartText" class="small warn-text"></p>
+          <div class="inline-buttons">
+            <button id="wsRestart" type="button" class="primary"></button>
+            <span id="wsRestartNote" class="small muted"></span>
+          </div>
+        </div>
       </section>
 
       <!-- Startup -->

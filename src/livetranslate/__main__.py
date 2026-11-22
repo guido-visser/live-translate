@@ -119,6 +119,20 @@ def restart_command(argv: list[str], pid: int, resume: bool) -> list[str]:
     return [*command, "--resume"] if resume else command
 
 
+def without_args(argv: list[str], drop: dict[str, bool]) -> list[str]:
+    """argv without these options; True: the option takes a value ("--port 8010" or "--port=8010")."""
+    out, i = [], 0
+    while i < len(argv):
+        arg = argv[i]
+        name = arg.split("=", 1)[0]
+        if name in drop:
+            i += 2 if drop[name] and "=" not in arg else 1
+            continue
+        out.append(arg)
+        i += 1
+    return out
+
+
 def lower_priority() -> None:
     """When the PC is busy the livestream goes first (LibreTranslate inherits this)."""
     if sys.platform == "win32":
@@ -314,6 +328,20 @@ def main() -> None:
     ).start()
 
     app.state.services.updater.request_exit = request_exit
+
+    def restart_for_new_port() -> None:
+        """Settings → Web Server: start again on the saved port, with the window open."""
+        import subprocess
+
+        argv = without_args(sys.argv[1:], {"--port": True, "--autostart": False, "--no-browser": False})
+        try:
+            subprocess.Popen(restart_command(argv, os.getpid(), resume=False))
+        except OSError:
+            log.exception("Could not start Live Translate again")
+            return
+        request_exit()
+
+    app.state.services.restart = restart_for_new_port
     if tray is None:
         server.run(sockets=sockets)
         return

@@ -101,7 +101,7 @@ Press **Settings** at the top of the main screen. These are the ones you are mos
 ![The Church tab](docs/images/settings-church.png)
 
 * **Name**: the names that must not be translated. Press the button after changing them.
-* **Church profile**: puts the name, languages, glossary and [training](#training-teach-it-your-churchs-songs) in one file, to move to another PC or share with another church. No PINs or server details go in it.
+* **Church profile**: puts the name, languages, glossary and [training](#training-teach-it-your-churchs-songs) in one file, to move to another PC or share with another church. No passwords or server details go in it.
 * **Adjust song detection**: if songs get translated, or speech gets skipped, this lets you fix it. Turn on the service log for one service first. You then see that service as a bar, with what was skipped in orange. Move the slider, or click part of the bar and say whether it was music or speech, and the slider moves to what fits best.
 
 ### Training: teach it your church's songs
@@ -155,7 +155,8 @@ Live Translate can put the translation in your livestream as subtitles, in **vMi
 ### The other tabs
 
 * **Audio**: the sound input, its volume, and the speech recognition model. A smaller model helps if your livestream starts stuttering.
-* **Network**: the Wi-Fi name shown with the QR code, and a PIN if you want to control the app from a tablet. [Listening over the internet](#listening-over-the-internet-5g) is also set up here.
+* **Network**: the Wi-Fi name shown with the QR code. [Listening over the internet](#listening-over-the-internet-5g) is also set up here.
+* **Web server**: control the app from a tablet or laptop on the same network. Choose a password, tick **Allow the admin page from other devices on the network**, and scan the QR code shown for your network (or open `http://<pc-address>:8000/admin`). The other device asks for the password once and stays signed in for 30 days after it was last used. The tab lists the signed-in devices, so you can sign out one or all of them; changing the password or turning the option off signs everyone out. The port can be changed here too: the app then updates the Windows Firewall rule (Windows asks for administrator rights) and offers to restart. QR codes printed before a port change stop working. The connection is plain HTTP, so someone on the same Wi-Fi could intercept the password; a separate network for staff is safer.
 * **Startup**: start with Windows, and start translating by itself. For a PC that starts entirely by itself, also turn on automatic sign-in in Windows.
 * **Service log**: keeps what was said and heard per service, on this PC only, to improve the settings with. It's off by default and can contain personal things such as prayers, so ask your church leadership first. Logs older than 30 days are removed.
 
@@ -223,7 +224,7 @@ Mixer / mic / livestream audio ──► Whisper speech recognition (GPU) ──
 
 It runs on Windows, macOS and Linux; the installer, the window and start with Windows are Windows-only. **From source:** install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run `start.cmd` (Windows) or `./start.sh` (macOS/Linux).
 
-The installer adds a Windows Firewall rule for TCP port 8000 so phones can connect, and installs the current Microsoft Visual C++ runtime when the PC has one older than 14.40 (older ones make the speech and voice libraries crash). If speech recognition or a voice can't load, the operator page says why instead of the app closing; crashes inside native libraries are written to `crash.log` in the data folder.
+The installer adds a Windows Firewall rule for TCP port 8000 so phones can connect (only when there is none yet, so an update keeps a port changed in **Settings → Web server**), and installs the current Microsoft Visual C++ runtime when the PC has one older than 14.40 (older ones make the speech and voice libraries crash). If speech recognition or a voice can't load, the operator page says why instead of the app closing; crashes inside native libraries are written to `crash.log` in the data folder.
 
 **First start on Windows.** `LiveTranslate.vbs` starts `LiveTranslateSetup.ps1` when the Python environment for this version is missing. That window runs before Python exists on the PC, so it uses PowerShell with WPF; if it can't run, `LiveTranslate.cmd` does the same work in a console. Moving the data folder is done there too (`-Move`), because the app runs from that folder: it copies the data, sets up the software again from the copied download cache, and only then switches over and removes the old copy.
 
@@ -268,7 +269,7 @@ Set it up under **Settings → Network → Listening over the internet**. Fill i
 * **Speech**: [Piper](https://github.com/OHF-Voice/piper1-gpl) voices (downloaded on demand), streamed per language as a continuous MP3 stream, only while someone listens.
 * **Privacy**: nothing is recorded or stored unless you turn on the service log. Transcripts otherwise exist only in memory; only settings are saved (`settings.json` in the standard folder).
 * **Service log** (off by default, **Settings → Service log**): one folder per service in `service-logs` in the data folder, with `events.jsonl` (sentences, translations, Whisper's confidence, what the sound detection heard, moments marked with **M** on the main screen) and optionally `audio.flac`. It stays on the PC and folders older than 30 days are removed. It can contain personal things such as prayers, so ask your church leadership first. The header shows when it is on.
-* **Admin protection**: the operator page only works on the PC itself. To control it from a tablet, set an admin PIN and open `http://<pc-address>:8000/admin?pin=<PIN>`.
+* **Admin protection**: on the PC itself the operator page opens without a password; other devices only get it when **Settings → Web server** allows it, after signing in. The password is stored as a scrypt hash in the settings, and a signed-in device holds a random session cookie (HttpOnly, SameSite=Strict) of which only a hash is kept, in `sessions.json` in the data folder. Ten wrong passwords from one device block it for 15 minutes; thirty from all devices together block sign-in from the network for 15 minutes. Signed-in devices can do everything except what only makes sense on the PC: installing updates, moving the data folder, opening the log folder, uploading files, closing the app, the internet tunnel and the Web server tab itself. An admin PIN from before 0.1.17 became the password. Over the internet tunnel the operator page is never reachable.
 
 Data (models, logs, the Python and LibreTranslate environments) lives in the folder picked at the first start (`data-location.txt` in the standard folder says which), by default `%LOCALAPPDATA%\LiveTranslate` (Windows), `~/Library/Application Support/LiveTranslate` (macOS) or `~/.local/share/LiveTranslate` (Linux). With a picked folder, LibreTranslate's models and the Hugging Face cache go there too (`XDG_*` and `HF_HOME`); without one they stay in the home folder, so older installs don't download everything again. Settings always stay in the standard folder.
 

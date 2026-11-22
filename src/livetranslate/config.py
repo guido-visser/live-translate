@@ -147,6 +147,16 @@ class RemoteSettings(BaseModel):
     local_port: int = Field(8001, ge=1024, le=65535)
 
 
+class WebServerSettings(BaseModel):
+    """The admin page from other devices on the network (Settings → Web Server); see server/auth.py."""
+
+    # Other devices may open the admin page after signing in; this PC itself never needs to.
+    lan_admin: bool = False
+    password_hash: str = ""  # scrypt, never the password itself
+    # Shorter than server.auth.MIN_PASSWORD: only an admin PIN from before 0.1.17 can be.
+    password_short: bool = False
+
+
 class ServiceLogSettings(BaseModel):
     """Keep a log of each service on this PC to improve the app with; off unless chosen (see servicelog.py)."""
 
@@ -224,8 +234,7 @@ class Settings(BaseModel):
     # The Wi-Fi name per network of this PC, by subnet ("192.168.10": "Church-Translation"): typed in
     # with the QR code, since the PC can't see the name of a router it is cabled to.
     wifi_names: dict[str, str] = Field(default_factory=dict)
-    # When set, the admin page may also be opened from other devices with this PIN.
-    admin_pin: str = ""
+    web_server: WebServerSettings = Field(default_factory=WebServerSettings)
     # When set, use this LibreTranslate instead of starting one ourselves.
     libretranslate_url: str = ""
     libretranslate_port: int = 5001
@@ -260,11 +269,31 @@ class Settings(BaseModel):
     asr: AsrSettings = Field(default_factory=AsrSettings)
 
 
+def _from_admin_pin(data: dict) -> bool:
+    """Until 0.1.17 other devices opened the admin page with ?pin=: that PIN becomes the password,
+    so access keeps working. True when there was a PIN, which then must leave the file."""
+    if "admin_pin" not in data:
+        return False
+    pin = str(data.pop("admin_pin") or "").strip()
+    if pin and "web_server" not in data:
+        from .server.auth import MIN_PASSWORD, hash_password
+
+        data["web_server"] = {
+            "lan_admin": True,
+            "password_hash": hash_password(pin),
+            "password_short": len(pin) < MIN_PASSWORD,
+        }
+    return True
+
+
 class SettingsStore:
     def __init__(self, path: Path | None = None):
         self.path = path or config_path()
         self._lock = threading.Lock()
+        self._migrated = False
         self.settings = self._load()
+        if self._migrated:
+            self.save(self.settings)  # the old admin PIN stood in the file as plain text
 
     def _load(self) -> Settings:
         if self.path.exists():
@@ -272,6 +301,7 @@ class SettingsStore:
                 data = json.loads(self.path.read_text("utf-8"))
                 data.setdefault("setup_done", True)  # set up before the wizard existed
                 data.setdefault("main_streaming", "vmix")  # the main screen always had vMix then
+                self._migrated = _from_admin_pin(data)
                 return Settings.model_validate(data)
             except Exception:
                 log.exception("Could not read %s, using defaults", self.path)

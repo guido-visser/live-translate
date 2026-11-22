@@ -19,7 +19,7 @@
     <div class="top-actions">
       <button id="perfBtn" class="icon-btn" type="button" aria-pressed="false"><span aria-hidden="true">📈</span> <span data-t="performance"></span></button>
       <button id="qrBtn" class="icon-btn" type="button"><span aria-hidden="true">▦</span> <span data-t="qr"></span></button>
-      <a class="icon-btn" href="/admin/settings" data-pin-link><span aria-hidden="true">⚙</span> <span data-t="settings"></span></a>
+      <a class="icon-btn" href="/admin/settings"><span aria-hidden="true">⚙</span> <span data-t="settings"></span></a>
       <select id="uiLang" aria-label="Language">
         <option value="nl">NL</option>
         <option value="en">EN</option>
@@ -34,6 +34,11 @@
     <a id="updateLink" target="_blank" rel="noopener"></a>
     <span id="updateNote" class="small"></span>
     <button id="updateBtn" class="primary" type="button" data-t="updateInstall"></button>
+  </div>
+
+  <div id="firewallBar" class="update-bar" role="alert" hidden>
+    <span class="warn-text" data-t="firewallProblem"></span>
+    <a href="/admin/settings#webserver" data-t="firewallOpen"></a>
   </div>
 
   <main class="grid main-grid">

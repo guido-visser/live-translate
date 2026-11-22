@@ -54,8 +54,9 @@ Name: "{autodesktop}\Live Translate"; Filename: "{sys}\wscript.exe"; Parameters:
 [Run]
 ; onnxruntime and sentencepiece crash on import with a Visual C++ runtime older than 14.40.
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Flags: waituntilterminated; Check: VcRuntimeOutdated
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Live Translate"""; Flags: runhidden
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Live Translate"" dir=in action=allow protocol=TCP localport=8000 profile=any"; Flags: runhidden
+; Only when there is no rule yet: the app changes its port when the port is changed in Settings → Web
+; Server, and an update must not put it back to 8000.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Live Translate"" dir=in action=allow protocol=TCP localport=8000 profile=any"; Flags: runhidden; Check: NoFirewallRule
 ; Through explorer: a program started by Setup can inherit its RedirectionGuard, and uv then refuses
 ; the Python folder link it made itself ("untrusted mount point", os error 448).
 Filename: "{win}\explorer.exe"; Parameters: """{app}\LiveTranslate.vbs"""; Description: "{cm:LaunchProgram,Live Translate}"; Flags: postinstall nowait skipifsilent runasoriginaluser
@@ -130,6 +131,15 @@ begin
     Result := ((MS shr 16) < 14) or (((MS shr 16) = 14) and ((MS and $FFFF) < 40))
   else
     Result := True;
+end;
+
+// True when there is no "Live Translate" firewall rule yet (netsh exits with 1 when it finds none).
+function NoFirewallRule: Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := not (Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall show rule name="Live Translate"', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0));
 end;
 
 // Set by the app's updater: /relaunch=1 /waitpid=<pid of the running app>.

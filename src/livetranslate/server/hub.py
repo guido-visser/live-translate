@@ -19,6 +19,7 @@ class Connection:
     def __init__(self, ws: WebSocket):
         self.ws = ws
         self.lang: str | None = None
+        self.session_id: str | None = None  # an admin page on another device (server/auth.py)
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=500)
         self._writer = asyncio.create_task(self._write())
 

@@ -333,3 +333,14 @@ input[type=search] { width: 100%; padding: 7px 10px; border: 1px solid var(--bor
   border-radius: 8px; padding: 8px 10px; margin: 6px 0; overflow-x: auto; white-space: pre;
 }
 #setupKey { white-space: pre-wrap; word-break: break-all; }
+
+/* -- Settings → Web Server, and the login page for other devices ---------------- */
+.tab-panel h3 { font-size: 15px; margin: 18px 0 6px; }
+.ws-addresses { display: grid; gap: 12px; margin-bottom: 12px; }
+.ws-address { display: flex; gap: 14px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.ws-address img { width: 120px; height: 120px; background: #fff; border-radius: 6px; flex: none; }
+.ws-address a { color: var(--accent); word-break: break-all; }
+.ws-sessions td button { padding: 4px 10px; }
+.login-main { display: grid; place-items: center; padding: 32px 16px; }
+.login-card { width: min(420px, 100%); }
+.login-card button { width: 100%; margin-top: 4px; }

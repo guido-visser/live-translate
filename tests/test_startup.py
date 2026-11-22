@@ -22,11 +22,13 @@ def test_new_options_leave_existing_installs_alone():
 def test_church_profile_holds_the_church_and_nothing_private(tmp_path):
     from fastapi.testclient import TestClient
 
-    from livetranslate.config import PROFILE_FIELDS, SettingsStore
+    from livetranslate.config import PROFILE_FIELDS, SettingsStore, WebServerSettings
     from livetranslate.server.app import create_app
+    from livetranslate.server.auth import hash_password
 
     store = SettingsStore(tmp_path / "settings.json")
-    store.save(Settings(church_name="Evangeliegemeente De Kandelaar", admin_pin="1234"))
+    secret = WebServerSettings(lan_admin=True, password_hash=hash_password("secret password"))
+    store.save(Settings(church_name="Evangeliegemeente De Kandelaar", web_server=secret))
     with TestClient(create_app(store, tmp_path, manage_translator=False)) as client:
         response = client.get("/api/admin/profile")
         assert client.get("/api/admin/state").json()["profile_fields"] == list(PROFILE_FIELDS)
@@ -34,7 +36,7 @@ def test_church_profile_holds_the_church_and_nothing_private(tmp_path):
     profile = response.json()
     assert profile["church_name"] == "Evangeliegemeente De Kandelaar"
     assert set(profile) == set(PROFILE_FIELDS)
-    assert "1234" not in response.text  # no PIN, server or tunnel details in a file meant for sharing
+    assert "scrypt" not in response.text  # no password, server or tunnel details in a file meant for sharing
 
 
 def test_autostart_command_uses_the_installed_launcher(monkeypatch, tmp_path):

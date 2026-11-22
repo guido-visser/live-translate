@@ -8,15 +8,23 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import anyio
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 
-from .. import __version__, autostart, calibration
+from .. import __version__, autostart, calibration, firewall
 from ..audio.devices import list_all
 from ..config import PROFILE_FIELDS, Settings, SettingsStore, SongModel, data_dir as default_data_dir
 from ..firstrun import Preparation
@@ -32,6 +40,7 @@ from ..translate.service import TranslationService
 from ..tts.piper import VOICES, SpeechService
 from ..tunnel import Tunnel
 from ..updater import Updater, install_dir, start_data_move
+from .auth import COOKIE, MIN_PASSWORD, SESSION_S, LoginLimiter, SessionStore, check_password, hash_password
 from .files import WebFiles
 from .hub import Connection, Hub
 from .network import GpuStats, host_url, lan_addresses, lan_networks, listener_url, qr_svg, subnet
@@ -45,6 +54,22 @@ WHISPER_MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
 # What phones may reach through the internet tunnel: the listener page and nothing else.
 TUNNEL_PATHS = {"/", "/manifest.webmanifest", "/sw.js", "/api/public", "/ws/listen", "/static/icon.png"}
 TUNNEL_PREFIXES = ("/static/client/", "/audio/")
+
+
+def _safe_next(target: str | None) -> str:
+    """Where the login page goes afterwards: only a page of the admin itself, never another site."""
+    target = target or ""
+    if target.startswith("/admin") and not target.startswith("/admin/login") and "//" not in target and "\\" not in target:
+        return target
+    return "/admin"
+
+
+def _port_free(port: int) -> bool:
+    try:
+        socket.create_server(("0.0.0.0", port)).close()
+    except OSError:
+        return False
+    return True
 
 
 def _is_local_name(address: str) -> bool:
@@ -118,6 +143,14 @@ class Services:
         self.gpu = GpuStats()
         self.updater = Updater(data, lambda: self.pipeline.state == "stopped")
         self.tunnel = Tunnel(data, store.settings.remote.local_port)
+        # The port this server listens on; settings.port may be newer, until the app restarts.
+        self.port = store.settings.port
+        self.sessions = SessionStore(data / "sessions.json")
+        self.limiter = LoginLimiter()
+        self.login_delay_s = 1.0  # after a wrong password
+        self.restart = None  # set by __main__: start the app again (for a new port)
+        self.firewall_problem = False  # the firewall rule opens another port than this server's
+        self.firewall_change = ""  # how the last change of the rule went: ok, cancelled, failed
         self.preparation = Preparation(self)
         self.trainer = Trainer(
             data,
@@ -139,7 +172,7 @@ class Services:
         s = self.settings
         if s.remote.enabled and s.remote.public_url.strip():
             return s.remote.public_url.strip().rstrip("/") + "/"
-        return listener_url(s.public_host, s.port)
+        return listener_url(s.public_host, self.port)
 
     def listener_urls(self) -> list[dict]:
         """Every address listeners can use, one tab each with the QR code: the internet address,
@@ -155,7 +188,7 @@ class Services:
         networks = lan_networks()
         host = s.public_host.strip()
         if host and host not in {n["ip"] for n in networks}:
-            urls.append({"name": host, "detail": "", "url": host_url(host, s.port), "key": "", "wifi": ""})
+            urls.append({"name": host, "detail": "", "url": host_url(host, self.port), "key": "", "wifi": ""})
         for n in networks:
             key = subnet(n["ip"])
             wifi = s.wifi_names.get(key, "").strip() or n["ssid"]
@@ -163,7 +196,7 @@ class Services:
             urls.append({
                 "name": wifi or n["name"] or n["ip"],
                 "detail": adapter if wifi else (n["ip"] if n["name"] else ""),
-                "url": host_url(n["ip"], s.port),
+                "url": host_url(n["ip"], self.port),
                 "key": key,
                 "wifi": wifi,
             })
@@ -173,6 +206,19 @@ class Services:
             urls.insert(0, {"name": default, "detail": "", "url": default, "key": "", "wifi": ""})
         if not urls[0]["wifi"]:
             urls[0]["wifi"] = s.wifi_name.strip()  # the one Wi-Fi name from before there were tabs
+        return urls
+
+    def admin_urls(self) -> list[dict]:
+        """The admin page for other devices, one per network of this PC (named like listener_urls)."""
+        s = self.settings
+        urls = []
+        for n in lan_networks():
+            wifi = s.wifi_names.get(subnet(n["ip"]), "").strip() or n["ssid"]
+            urls.append({
+                "name": wifi or n["name"] or n["ip"],
+                "detail": " · ".join(x for x in (n["name"], n["ip"]) if x),
+                "url": host_url(n["ip"], self.port) + "admin",
+            })
         return urls
 
     def listener_languages(self) -> list[dict]:
@@ -225,6 +271,7 @@ def create_app(
                 if services.settings.auto_start_translation or resume:
                     tasks.append(asyncio.create_task(_auto_start(services)))
             await services.tunnel.apply(services.settings.remote)
+            tasks.append(asyncio.create_task(_check_firewall(services)))
         yield
         for task in tasks:
             task.cancel()
@@ -239,18 +286,69 @@ def create_app(
     app.add_middleware(TunnelGuard, tunnel=services.tunnel)
     app.add_middleware(LogFailedRequests)
 
-    def require_admin(request: Request | WebSocket) -> None:
-        host = request.client.host if request.client else ""
-        pin = services.settings.admin_pin
-        address = request.headers.get("host", "")
+    def client_ip(request: Request | WebSocket) -> str:
+        return request.client.host if request.client else ""
+
+    def check_origin(request: Request | WebSocket) -> None:
         # A website open in a browser on this PC also comes from 127.0.0.1. Browsers say where a
         # request comes from (Origin); the address checks out too when a website's name points here.
+        address = request.headers.get("host", "")
         origin = request.headers.get("origin")
         if origin and origin.split("://", 1)[-1].lower() != address.lower():
             raise HTTPException(403, "Requests from other websites are refused.")
-        if (host in LOCAL_HOSTS and _is_local_name(address)) or (pin and request.query_params.get("pin") == pin):
-            return
+
+    def is_local(request: Request | WebSocket) -> bool:
+        return client_ip(request) in LOCAL_HOSTS and _is_local_name(request.headers.get("host", ""))
+
+    def remote_admin_on() -> bool:
+        ws = services.settings.web_server
+        return ws.lan_admin and bool(ws.password_hash)
+
+    def admin_access(request: Request | WebSocket) -> str:
+        """"local" on this PC; "remote" for another device that signed in (Settings → Web Server).
+        401: it may sign in; 403: the admin page isn't open to other devices."""
+        check_origin(request)
+        if is_local(request):
+            return "local"
+        if remote_admin_on():
+            session_id = services.sessions.check(request.cookies.get(COOKIE), client_ip(request))
+            if session_id:
+                request.state.session_id = session_id
+                return "remote"
+            raise HTTPException(401, "Sign in first.")
         raise HTTPException(403, "The admin page is only available on this computer.")
+
+    def require_admin(request: Request | WebSocket) -> str:
+        return admin_access(request)
+
+    def require_local_admin(request: Request | WebSocket, detail: str = "This can only be done on the PC itself.") -> None:
+        if admin_access(request) != "local":
+            raise HTTPException(403, detail)
+
+    def admin_page(request: Request) -> Response | None:
+        """None when this device may see the admin pages; otherwise the login page or a 403."""
+        try:
+            require_admin(request)
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                return RedirectResponse(f"/admin/login?next={quote(request.url.path)}", status_code=303)
+            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+        return None
+
+    async def close_admin_ws(conn: Connection) -> None:
+        with contextlib.suppress(Exception):
+            await conn.ws.close(code=4401)
+
+    def end_sessions(session_id: str | None = None) -> None:
+        """Sign out one device (or all of them); their open admin pages go to the login page."""
+        if session_id:
+            services.sessions.revoke(session_id)
+        else:
+            services.sessions.revoke_all()
+        for conn in list(services.hub.admins):
+            sid = getattr(conn, "session_id", None)
+            if sid and (session_id is None or sid == session_id):
+                asyncio.create_task(close_admin_ws(conn))
 
     # -- pages -----------------------------------------------------------------
 
@@ -268,11 +366,9 @@ def create_app(
         return web.response("client/sw.js", request)
 
     @app.get("/admin", include_in_schema=False)
-    async def admin_page(request: Request):
-        try:
-            require_admin(request)
-        except HTTPException as exc:
-            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+    async def main_admin_page(request: Request):
+        if (refused := admin_page(request)) is not None:
+            return refused
         if not services.settings.setup_done:
             query = request.url.query
             return RedirectResponse(f"/admin/setup?{query}" if query else "/admin/setup", status_code=307)
@@ -280,19 +376,69 @@ def create_app(
 
     @app.get("/admin/setup", include_in_schema=False)
     async def setup_page(request: Request):
-        try:
-            require_admin(request)
-        except HTTPException as exc:
-            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+        if (refused := admin_page(request)) is not None:
+            return refused
         return web.response("admin/setup.html", request)
 
     @app.get("/admin/settings", include_in_schema=False)
     async def settings_page(request: Request):
-        try:
-            require_admin(request)
-        except HTTPException as exc:
-            return HTMLResponse(f"<h1>403</h1><p>{exc.detail}</p>", status_code=403)
+        if (refused := admin_page(request)) is not None:
+            return refused
         return web.response("admin/settings.html", request)
+
+    @app.get("/admin/login", include_in_schema=False)
+    async def login_page(request: Request):
+        if is_local(request):
+            return RedirectResponse(_safe_next(request.query_params.get("next")), status_code=303)
+        if not remote_admin_on():
+            return HTMLResponse("<h1>403</h1><p>The admin page is only available on this computer.</p>", status_code=403)
+        return web.response("admin/login.html", request)
+
+    def set_session_cookie(response: Response, token: str) -> None:
+        # Not Secure: the page is plain HTTP on the local network (Settings → Web Server says so).
+        response.set_cookie(COOKIE, token, max_age=SESSION_S, httponly=True, samesite="strict", path="/")
+
+    @app.post("/api/admin/login")
+    async def login(request: Request):
+        check_origin(request)
+        if is_local(request):
+            return {"ok": True}  # this PC needs no password
+        if not remote_admin_on():
+            raise HTTPException(403, "The admin page is only available on this computer.")
+        ip = client_ip(request)
+
+        def refuse_if_blocked() -> None:
+            wait = services.limiter.blocked_for(ip)
+            if wait:
+                raise HTTPException(429, "Too many wrong passwords.", headers={"Retry-After": str(wait)})
+
+        refuse_if_blocked()
+        try:
+            password = str((await request.json()).get("password") or "")[:200]
+        except ValueError as exc:
+            raise HTTPException(400, "No password") from exc
+        if not await asyncio.to_thread(check_password, password, services.settings.web_server.password_hash):
+            services.limiter.failed(ip)
+            log.info("Wrong admin password from %s", ip)
+            await asyncio.sleep(services.login_delay_s)
+            refuse_if_blocked()
+            raise HTTPException(401, "Wrong password.")
+        services.limiter.succeeded(ip)
+        token, _ = services.sessions.create(ip, request.headers.get("user-agent", ""))
+        log.info("Admin page signed in from %s", ip)
+        response = JSONResponse({"ok": True})
+        set_session_cookie(response, token)
+        return response
+
+    @app.post("/api/admin/logout")
+    async def logout(request: Request):
+        check_origin(request)
+        session_id = services.sessions.check(request.cookies.get(COOKIE))
+        if session_id:
+            end_sessions(session_id)
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(COOKIE, path="/")
+        return response
 
     @app.get("/admin/defaults.js", include_in_schema=False)
     async def admin_defaults():
@@ -354,7 +500,9 @@ def create_app(
         # Only addresses of this app, so the QR page can't be made to point anywhere else.
         if not url or url == services.listener_url():
             url = services.listener_url()
-        elif url not in {u["url"] for u in await asyncio.to_thread(services.listener_urls)}:
+        elif url not in {u["url"] for u in await asyncio.to_thread(services.listener_urls)} and not (
+            remote_admin_on() and url in {u["url"] for u in await asyncio.to_thread(services.admin_urls)}
+        ):
             raise HTTPException(404, "Unknown address")
         svg = qr_svg(url)
         return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "no-cache"})
@@ -413,7 +561,7 @@ def create_app(
 
     # -- admin API -------------------------------------------------------------
 
-    def admin_state() -> dict:
+    def admin_state(access: str = "local") -> dict:
         s = services.settings
         tr = services.translator
         source = s.source_language
@@ -430,7 +578,9 @@ def create_app(
             "version": __version__,
             "data_folder": str(services.data),
             "can_move_data": install_dir() is not None,
-            "settings": s.model_dump(),
+            "settings": s.model_dump(exclude={"web_server": {"password_hash"}}),
+            "access": access,
+            "firewall_problem": services.firewall_problem,
             "status": services.pipeline.status(),
             "quick_language_options": [
                 l for l in sources if l["code"] in WHISPER_LANGUAGES and l["code"] != source
@@ -459,8 +609,12 @@ def create_app(
 
     @app.get("/api/admin/state")
     async def get_state(request: Request):
-        require_admin(request)
-        return admin_state()
+        access = require_admin(request)
+        response = JSONResponse(admin_state(access))
+        token = request.cookies.get(COOKIE)
+        if access == "remote" and token:
+            set_session_cookie(response, token)  # the cookie lasts as long as the session: 30 days from now
+        return response
 
     @app.get("/api/admin/devices")
     async def get_devices(request: Request):
@@ -479,9 +633,14 @@ def create_app(
 
     @app.post("/api/admin/settings")
     async def save_settings(request: Request):
-        require_admin(request)
+        access = require_admin(request)
         old = services.settings
-        new = Settings.model_validate(await request.json())
+        body = await request.json()
+        body.pop("web_server", None)  # without the password hash, which pages never get
+        new = Settings.model_validate(body)
+        new.web_server = old.web_server  # changed in its own tab, only on this PC (/api/admin/webserver/*)
+        if access == "remote":
+            new.remote = old.remote  # the tunnel goes with this PC's key
         new.port = old.port  # the port only changes on restart (it is in the QR code)
         new.remote.local_port = old.remote.local_port  # bound at start
         # These have their own switch and slider; a page's older copy must not undo them.
@@ -519,7 +678,7 @@ def create_app(
         if new.remote != old.remote:
             in_turn(tunnel_turn, lambda: services.tunnel.apply(new.remote))
         services.hub.to_listeners(services.languages_message())
-        return admin_state()
+        return admin_state(access)
 
     @app.post("/api/admin/start")
     async def start(request: Request):
@@ -710,9 +869,7 @@ def create_app(
 
     @app.post("/api/admin/close")
     async def close_choice(request: Request):
-        require_admin(request)
-        if not request.client or request.client.host not in LOCAL_HOSTS:
-            raise HTTPException(403, "Only the window on the PC itself can do this.")
+        require_local_admin(request, "Only the window on the PC itself can do this.")
         body = await request.json()
         action = body.get("action")
         if action not in ("tray", "exit"):
@@ -727,9 +884,7 @@ def create_app(
     @app.post("/api/admin/data/move")
     async def move_data(request: Request):
         """Close the app and let the setup window move the data; see LiveTranslateSetup.ps1."""
-        require_admin(request)
-        if not request.client or request.client.host not in LOCAL_HOSTS:
-            raise HTTPException(403, "The folder is chosen on the PC itself.")
+        require_local_admin(request, "The folder is chosen on the PC itself.")
         folder = install_dir()
         if folder is None:
             raise HTTPException(400, "Only the installed app can move its data.")
@@ -748,7 +903,7 @@ def create_app(
 
     @app.post("/api/admin/logs/open")
     async def open_logs(request: Request):
-        require_admin(request)
+        require_local_admin(request)
         folder = services.pipeline.logs_dir
         folder.mkdir(parents=True, exist_ok=True)
         if hasattr(os, "startfile"):
@@ -845,7 +1000,7 @@ def create_app(
     @app.post("/api/admin/update/install")
     async def install_update(request: Request):
         """Download and start the new installer; the app then closes and Setup starts it again."""
-        require_admin(request)
+        require_local_admin(request)
         try:
             await services.updater.install()
         except RuntimeError as exc:
@@ -855,7 +1010,7 @@ def create_app(
     @app.post("/api/admin/tunnel/key")
     async def tunnel_key(request: Request):
         """Create this PC's key pair for the tunnel (once); returns the tunnel status with the public key."""
-        require_admin(request)
+        require_local_admin(request)
         try:
             await services.tunnel.create_key()
         except RuntimeError as exc:
@@ -865,7 +1020,7 @@ def create_app(
     @app.post("/api/admin/tunnel/forget")
     async def tunnel_forget(request: Request):
         """Forget the server's identity (after reinstalling it) and connect again."""
-        require_admin(request)
+        require_local_admin(request)
         services.tunnel.forget_server()
         remote = services.settings.remote
         await services.tunnel.stop()
@@ -875,7 +1030,7 @@ def create_app(
     @app.post("/api/admin/upload")
     async def upload(request: Request):
         """Store an audio file for rehearsals. Body is the raw file."""
-        require_admin(request)
+        require_local_admin(request)
         name = re.sub(r"[^\w.\- ]", "_", request.query_params.get("name", "audio.wav"))[:100]
         folder = services.data / "uploads"
         folder.mkdir(parents=True, exist_ok=True)
@@ -885,15 +1040,124 @@ def create_app(
                 f.write(chunk)
         return {"path": str(path)}
 
+    # -- Settings → Web Server (only on this PC) --------------------------------
+
+    async def web_server_state() -> dict:
+        s = services.settings
+        ws = s.web_server
+        return {
+            "lan_admin": ws.lan_admin,
+            "password_set": bool(ws.password_hash),
+            "password_short": ws.password_short,
+            "min_password": MIN_PASSWORD,
+            "running_port": services.port,
+            "saved_port": s.port,
+            "firewall": await asyncio.to_thread(firewall.status, s.port),
+            "firewall_change": services.firewall_change,
+            "can_restart": services.restart is not None,
+            "admin_urls": await asyncio.to_thread(services.admin_urls) if ws.lan_admin else [],
+            "sessions": [
+                {k: row[k] for k in ("id", "created", "last_seen", "ip", "ua")} for row in services.sessions.list()
+            ],
+        }
+
+    def save_web_server(**changes) -> None:
+        s = services.settings
+        services.store.save(s.model_copy(update={"web_server": s.web_server.model_copy(update=changes)}))
+
+    @app.get("/api/admin/webserver")
+    async def get_web_server(request: Request):
+        require_local_admin(request)
+        return await web_server_state()
+
+    @app.post("/api/admin/webserver/password")
+    async def set_password(request: Request):
+        require_local_admin(request)
+        password = str((await request.json()).get("password") or "")
+        if len(password) < MIN_PASSWORD:
+            raise HTTPException(400, f"Use at least {MIN_PASSWORD} characters.")
+        if len(password) > 200:
+            raise HTTPException(400, "That password is too long.")
+        save_web_server(password_hash=await asyncio.to_thread(hash_password, password), password_short=False)
+        end_sessions()  # whoever knew the old one is out
+        log.info("Admin password changed; every device signs in again")
+        return await web_server_state()
+
+    @app.post("/api/admin/webserver/lan")
+    async def set_lan_admin(request: Request):
+        require_local_admin(request)
+        on = bool((await request.json()).get("on"))
+        if on and not services.settings.web_server.password_hash:
+            raise HTTPException(400, "Choose a password first.")
+        save_web_server(lan_admin=on)
+        if not on:
+            end_sessions()
+        log.info("Admin page from the network %s", "allowed" if on else "switched off")
+        return await web_server_state()
+
+    @app.post("/api/admin/webserver/port")
+    async def set_port(request: Request):
+        require_local_admin(request)
+        try:
+            port = int((await request.json()).get("port"))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, "Not a port number.") from exc
+        s = services.settings
+        if not 1024 <= port <= 65535:
+            raise HTTPException(400, "Choose a port from 1024 to 65535.")
+        if port in (s.remote.local_port, s.libretranslate_port):
+            raise HTTPException(400, f"Port {port} is already used by Live Translate itself.")
+        if port != services.port and not await asyncio.to_thread(_port_free, port):
+            raise HTTPException(409, f"Another program is using port {port}.")
+        if port != s.port:
+            services.store.save(s.model_copy(update={"port": port}))
+            services.firewall_change = ""
+            log.info("Port changed to %d; used after a restart", port)
+        return await web_server_state()
+
+    @app.post("/api/admin/webserver/firewall")
+    async def fix_firewall(request: Request):
+        require_local_admin(request)
+        port = services.settings.port
+        services.firewall_change = await asyncio.to_thread(firewall.update_rule, port)
+        if services.firewall_change == "ok" and port == services.port:
+            services.firewall_problem = False
+        return await web_server_state()
+
+    @app.post("/api/admin/webserver/restart")
+    async def restart_app(request: Request):
+        require_local_admin(request)
+        if services.pipeline.state != "stopped":
+            raise HTTPException(409, "Stop translating first.")
+        if services.restart is None:
+            raise HTTPException(503, "Start Live Translate again yourself to use the new port.")
+        log.info("Restarting for port %d", services.settings.port)
+        asyncio.get_running_loop().call_later(0.5, services.restart)
+        return {"ok": True, "port": services.settings.port}
+
+    @app.delete("/api/admin/webserver/sessions/{session_id}")
+    async def sign_out_device(session_id: str, request: Request):
+        require_local_admin(request)
+        end_sessions(session_id)
+        return await web_server_state()
+
+    @app.post("/api/admin/webserver/sessions/revoke-all")
+    async def sign_out_all(request: Request):
+        require_local_admin(request)
+        end_sessions()
+        return await web_server_state()
+
     @app.websocket("/ws/admin")
     async def admin_ws(ws: WebSocket):
         try:
-            require_admin(ws)
-        except HTTPException:
-            await ws.close(code=4403)
+            access = require_admin(ws)
+        except HTTPException as exc:
+            await ws.close(code=4401 if exc.status_code == 401 else 4403)
             return
         await ws.accept()
         conn = Connection(ws)
+        if access == "remote":
+            conn.session_id = ws.state.session_id
         services.hub.admins.add(conn)
         try:
             while True:
@@ -909,6 +1173,18 @@ def create_app(
 
 def translator_status(tr: TranslationService) -> dict:
     return {"engine": tr.engine, "status": tr.status, "detail": tr.detail, "needs_restart": tr.needs_restart}
+
+
+async def _check_firewall(services: Services) -> None:
+    """A rule for another port (the port was changed, or an old installer reset the rule) keeps
+    phones out; the operator page says so. No rule at all is not certain: Windows may have asked
+    to let Python through when the app first started."""
+    status = await asyncio.to_thread(firewall.status, services.port)
+    if status == "mismatch":
+        log.warning("The Windows Firewall rule doesn't open port %d; phones may not connect", services.port)
+        services.firewall_problem = True
+    elif status == "missing":
+        log.info("There is no Windows Firewall rule for Live Translate")
 
 
 async def _check_native(services: Services) -> None:

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const { $, t, api, withPin, langName, sortByName } = window.LT;
+  const { $, t, api, langName, sortByName } = window.LT;
   const form = $("settingsForm");
 
   let state = null;
@@ -30,6 +30,7 @@
     document.querySelectorAll(".tab-panel").forEach((p) => (p.hidden = p.dataset.panel !== name));
     history.replaceState(null, "", `${location.pathname}${location.search}#${name}`);
     if (name === "about" && state?.settings.check_updates && !state.update.latest) $("checkNow").click();
+    if (name === "webserver" && state) loadWebServer();
   }
 
   tabs.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -63,7 +64,7 @@
   $("fileUpload").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const res = await fetch(withPin(`/api/admin/upload?name=${encodeURIComponent(file.name)}`), { method: "POST", body: file });
+    const res = await fetch(`/api/admin/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
     $("filePath").value = (await res.json()).path;
     markDirty();
   });
@@ -591,8 +592,6 @@
 
     renderAddresses();
     $("wifi").value = s.wifi_name;
-    $("pin").value = s.admin_pin;
-    $("port").value = s.port;
     $("checkUpdates").checked = s.check_updates;
     $("windowsOnly").hidden = $("appWindowRow").hidden = $("closeActionRow").hidden = !state.windows;
     $("churchName").value = s.church_name;
@@ -661,7 +660,6 @@
 
     s.public_host = $("address").value === "__custom" ? "" : $("address").value;
     s.wifi_name = $("wifi").value.trim();
-    s.admin_pin = $("pin").value.trim();
     s.check_updates = $("checkUpdates").checked;
     s.church_name = $("churchName").value.trim();
     s.church_short_name = $("churchShort").value.trim();
@@ -730,7 +728,7 @@
 
   const clockTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   const minutes = (s) => t("calMinutes").replace("{n}", Math.round(s / 60));
-  const calUrl = (path) => withPin(`/api/admin/logs/${encodeURIComponent(calService.name)}/${path}`);
+  const calUrl = (path) => `/api/admin/logs/${encodeURIComponent(calService.name)}/${path}`;
   const calLevel = () => calService.levels[$("calLevel").value];
 
   // The whole service as stretches that are skipped or translated at this level.
@@ -1153,7 +1151,7 @@
     await saveFirst();
     await api("/api/admin/setup/again", { method: "POST" });
     dirty = false;
-    location.href = withPin("/admin/setup?again=1");
+    location.href = "/admin/setup?again=1";
   });
 
   $("moveData").addEventListener("click", async () => {
@@ -1168,6 +1166,202 @@
     } catch (err) {
       $("moveStatus").className = "small error";
       $("moveStatus").textContent = err.message;
+    }
+  });
+
+  // -- web server --------------------------------------------------------------------------------
+
+  // Only on this PC, through its own requests: never part of the auto-save, so half a password or
+  // port never takes effect. Another device sees this tab without being able to change it.
+  let web = null; // /api/admin/webserver
+  let webLoaded = 0;
+  let webDrawn = { addresses: "", sessions: "" };
+  let pipelineState = "stopped";
+  const remote = () => state?.access === "remote";
+  const webPanel = document.querySelector("[data-panel=webserver]");
+
+  function showWebError(err) {
+    $("wsError").textContent = err ? err.message || String(err) : "";
+    $("wsError").hidden = !err;
+  }
+
+  async function webCall(path, body, method = "POST") {
+    showWebError(null);
+    try {
+      web = await api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+      renderWebServer();
+      return true;
+    } catch (err) {
+      showWebError(err);
+      renderWebServer();
+      return false;
+    }
+  }
+
+  async function loadWebServer() {
+    webLoaded = Date.now();
+    if (!remote()) {
+      try {
+        web = await api("/api/admin/webserver");
+      } catch (err) {
+        showWebError(err);
+      }
+    }
+    renderWebServer();
+  }
+
+  function deviceName(ua) {
+    const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox"
+      : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+    const system = /iPhone|iPad/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows"
+      : /Mac OS X/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
+    return [browser, system].filter(Boolean).join(" · ") || ua.slice(0, 40) || "?";
+  }
+
+  function renderAdminUrls(force) {
+    const key = JSON.stringify([web.lan_admin, web.admin_urls]);
+    if (!force && key === webDrawn.addresses) return;
+    webDrawn.addresses = key;
+    $("wsAddresses").hidden = !web.lan_admin;
+    const list = $("wsAddressList");
+    list.textContent = "";
+    for (const a of web.admin_urls) {
+      const item = list.appendChild(document.createElement("div"));
+      item.className = "ws-address";
+      const img = item.appendChild(document.createElement("img"));
+      img.alt = "";
+      img.src = `/api/qr.svg?url=${encodeURIComponent(a.url)}`;
+      const text = item.appendChild(document.createElement("div"));
+      text.appendChild(document.createElement("strong")).textContent = a.name;
+      if (a.detail && a.detail !== a.name) {
+        const detail = text.appendChild(document.createElement("div"));
+        detail.className = "small muted";
+        detail.textContent = a.detail;
+      }
+      const link = text.appendChild(document.createElement("a"));
+      link.href = a.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = a.url;
+    }
+    if (!web.admin_urls.length) list.textContent = t("wsNoNetwork");
+  }
+
+  function renderSessions(force) {
+    const key = JSON.stringify(web.sessions.map((row) => [row.id, row.ip, Math.floor(row.last_seen / 60)]));
+    if (!force && key === webDrawn.sessions) return;
+    webDrawn.sessions = key;
+    const rows = $("wsSessions").querySelector("tbody");
+    rows.textContent = "";
+    for (const row of web.sessions) {
+      const tr = rows.insertRow();
+      tr.insertCell().textContent = deviceName(row.ua);
+      tr.insertCell().textContent = row.ip;
+      tr.insertCell().textContent = new Date(row.last_seen * 1000).toLocaleString(window.LT.lang);
+      const button = tr.insertCell().appendChild(document.createElement("button"));
+      button.type = "button";
+      button.textContent = t("wsSignOut");
+      button.addEventListener("click", () => webCall(`/api/admin/webserver/sessions/${encodeURIComponent(row.id)}`, undefined, "DELETE"));
+    }
+    $("wsSessions").hidden = !web.sessions.length;
+    $("wsNoSessions").hidden = Boolean(web.sessions.length);
+    $("wsSignOutAll").disabled = !web.sessions.length;
+  }
+
+  function renderRestart() {
+    if (!web || remote()) return;
+    const pending = web.saved_port !== web.running_port;
+    $("wsRestartBox").hidden = !pending;
+    if (!pending) return;
+    $("wsRestartText").textContent = t("wsRestartText").replace("{port}", web.saved_port);
+    $("wsRestart").textContent = t("wsRestart").replace("{port}", web.saved_port);
+    const running = pipelineState !== "stopped";
+    $("wsRestart").disabled = running || !web.can_restart;
+    $("wsRestartNote").textContent = running ? t("wsRestartStopFirst") : web.can_restart ? "" : t("wsRestartYourself");
+  }
+
+  function renderWebServer(force = false) {
+    if (!state) return;
+    const isRemote = remote();
+    $("wsRemoteNote").hidden = !isRemote;
+    $("wsPasswordBox").hidden = $("wsSessionsBox").hidden = isRemote;
+    if (isRemote) {
+      webPanel.querySelectorAll("input, button").forEach((el) => (el.disabled = true));
+      $("wsLan").checked = state.settings.web_server.lan_admin;
+      $("wsLanNeedsPassword").hidden = true;
+      $("wsPort").value = state.settings.port;
+      $("wsAddresses").hidden = $("wsFixFirewall").hidden = $("wsRestartBox").hidden = true;
+      $("wsFirewall").textContent = "";
+      return;
+    }
+    if (!web) return;
+    $("wsLan").checked = web.lan_admin;
+    $("wsLan").disabled = !web.password_set && !web.lan_admin;
+    $("wsLanNeedsPassword").hidden = web.password_set;
+    const pw = $("wsPasswordState");
+    pw.textContent = !web.password_set ? t("wsPasswordNone")
+      : web.password_short ? t("wsPasswordShort").replace("{n}", web.min_password) : t("wsPasswordSet");
+    pw.className = `small ${web.password_set && !web.password_short ? "muted" : "warn-text"}`;
+    renderAdminUrls(force);
+    renderSessions(force);
+    if (document.activeElement !== $("wsPort")) $("wsPort").value = web.saved_port;
+    const key = { ok: "wsFirewallOk", missing: "wsFirewallMissing", mismatch: "wsFirewallMismatch" }[web.firewall] || "wsFirewallUnknown";
+    let text = t(key).replace("{port}", web.saved_port);
+    if (web.firewall_change === "cancelled") text += ` ${t("wsFirewallCancelled")}`;
+    else if (web.firewall_change === "failed") text += ` ${t("wsFirewallFailed")}`;
+    $("wsFirewall").textContent = text;
+    $("wsFirewall").className = `small ${["ok", "unknown"].includes(web.firewall) ? "muted" : "warn-text"}`;
+    $("wsFixFirewall").hidden = !["missing", "mismatch"].includes(web.firewall);
+    renderRestart();
+  }
+
+  $("wsLan").addEventListener("change", () => webCall("/api/admin/webserver/lan", { on: $("wsLan").checked }));
+
+  $("wsSavePassword").addEventListener("click", async () => {
+    const password = $("wsNewPassword").value;
+    const min = web?.min_password || 8;
+    const message = $("wsPasswordMessage");
+    message.className = "small warn-text";
+    if (password.length < min) {
+      message.textContent = t("wsPasswordTooShort").replace("{n}", min);
+      return;
+    }
+    if (password !== $("wsRepeatPassword").value) {
+      message.textContent = t("wsPasswordMismatch");
+      return;
+    }
+    message.textContent = "";
+    if (await webCall("/api/admin/webserver/password", { password })) {
+      $("wsNewPassword").value = $("wsRepeatPassword").value = "";
+      message.className = "small muted";
+      message.textContent = t("wsPasswordSaved");
+    }
+  });
+
+  $("wsSignOutAll").addEventListener("click", () => webCall("/api/admin/webserver/sessions/revoke-all"));
+  $("wsApplyPort").addEventListener("click", () => webCall("/api/admin/webserver/port", { port: Number($("wsPort").value) }));
+  $("wsPort").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    $("wsApplyPort").click();
+  });
+
+  $("wsFixFirewall").addEventListener("click", async () => {
+    $("wsFixFirewall").disabled = true;
+    $("wsFirewall").textContent = t("wsFirewallWorking");
+    await webCall("/api/admin/webserver/firewall");
+    $("wsFixFirewall").disabled = false;
+  });
+
+  $("wsRestart").addEventListener("click", async () => {
+    $("wsRestart").disabled = true;
+    try {
+      await saveFirst();
+      await api("/api/admin/webserver/restart", { method: "POST" });
+      $("wsRestartNote").textContent = t("wsRestarting");
+    } catch (err) {
+      showWebError(err);
+      renderRestart();
     }
   });
 
@@ -1250,7 +1444,7 @@
   window.LT.beforeClosing = saveFirst;
 
   // The test sentence, the search fields and file pickers are not settings, and calibrating saves its own.
-  const isSetting = (e) => e.target.id !== "glossarySample" && !["search", "file"].includes(e.target.type) && !e.target.closest("#calibration, [data-panel=training]");
+  const isSetting = (e) => e.target.id !== "glossarySample" && !["search", "file"].includes(e.target.type) && !e.target.closest("#calibration, [data-panel=training], [data-panel=webserver]");
   const isTyped = (el) => el.matches?.("input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file])");
   form.addEventListener("input", (e) => {
     if (!isSetting(e) || !isTyped(e.target)) return;
@@ -1271,7 +1465,7 @@
     if (!dirty && !saving) return;
     e.preventDefault();
     await saveFirst();
-    if (!saveFailed) location.href = e.currentTarget?.href || withPin("/admin");
+    if (!saveFailed) location.href = e.currentTarget?.href || "/admin";
   });
   window.addEventListener("pagehide", () => {
     if (dirty && canSave()) window.LT.saveSettings(collect()).catch(() => {});
@@ -1281,10 +1475,13 @@
   // Live level meter, so the input can be checked while choosing it.
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(withPin(`${proto}://${location.host}/ws/admin`));
+    const ws = new WebSocket(`${proto}://${location.host}/ws/admin`);
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type !== "tick") return;
+      pipelineState = msg.status?.state || pipelineState;
+      renderRestart();
+      if (!webPanel.hidden && Date.now() - webLoaded > 10000) loadWebServer();
       if (msg.tunnel && JSON.stringify(msg.tunnel) !== JSON.stringify(state.tunnel)) {
         state.tunnel = msg.tunnel;
         renderTunnel();
@@ -1294,7 +1491,7 @@
       $("meterFill").className = db > -3 ? "clip" : db > -12 ? "hot" : "";
       $("levelText").textContent = db <= -119 ? "–∞ dB" : `${db.toFixed(0)} dB`;
     };
-    ws.onclose = () => setTimeout(connect, 2000);
+    ws.onclose = (ev) => window.LT.socketClosed(ev, connect);
   }
 
   window.LT.onLanguageChange(() => {
@@ -1313,13 +1510,16 @@
     renderCalibration();
     renderTrainedModel();
     renderTraining();
+    renderWebServer(true);
   });
   window.LT.applyTexts();
   showTab(location.hash.slice(1));
   Promise.all([api("/api/admin/state"), api("/api/admin/devices")]).then(([s, d]) => {
     state = s;
     devices = d;
+    window.LT.showAccess(state.access);
     fill();
+    loadWebServer();
     renderTrainedModel();
     refreshTraining();
     if (state.settings.vmix.enabled || state.settings.vmix.input) refreshVmix();
